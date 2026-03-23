@@ -66,7 +66,9 @@ def cutamp_demo(
     cost_reducer = CostReducer(constraint_to_mult)
     constraint_checker = ConstraintChecker(default_constraint_to_tol.copy())
 
-    run_cutamp(env, config, cost_reducer, constraint_checker, experiment_id=experiment_id)
+    plan, _, failure_reason = run_cutamp(env, config, cost_reducer, constraint_checker, experiment_id=experiment_id)
+    if plan is None:
+        _log.warning(f"No plan found: {failure_reason}")
 
 
 def entrypoint():
