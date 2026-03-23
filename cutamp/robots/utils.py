@@ -7,6 +7,7 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 
+from pathlib import Path
 from typing import Union, Sequence, Dict
 
 import numpy as np
@@ -16,7 +17,25 @@ import trimesh
 from jaxtyping import Float
 from yourdfpy import URDF
 
+from curobo.types.base import TensorDeviceType
 from cutamp.utils.rerun_utils import clean_rerun_path, log_scene
+
+
+def get_robotiq_2f_85_gripper_spheres(
+    tensor_args: TensorDeviceType = TensorDeviceType(),
+) -> Float[torch.Tensor, "num_spheres 4"]:
+    """
+    Collision spheres for the Robotiq 2F-85 gripper (shared across robots).
+    Spheres are in the origin frame with z-up (not the conventional z-down gripper frame).
+    """
+    assets_dir = Path(__file__).parent / "assets"
+    spheres_pt = assets_dir / "robotiq_2f_85_gripper_spheres.pt"
+    if not spheres_pt.exists():
+        raise FileNotFoundError(f"Robotiq 2F-85 gripper spheres file not found at {spheres_pt}")
+    spheres = torch.load(spheres_pt, map_location=tensor_args.device, weights_only=True)
+    assert spheres.ndim == 2 and spheres.shape[1] == 4, f"Invalid shape for Robotiq 2F-85 gripper spheres: {spheres.shape}"
+    spheres = spheres[spheres[:, 3] > 0]
+    return spheres
 
 
 def _get_scene_transforms(

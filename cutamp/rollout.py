@@ -116,7 +116,11 @@ class RolloutFunction:
         def get_grasp_mat4x4(grasp_name_: str) -> Float[torch.Tensor, "num_particles 4 4"]:
             if grasp_name_ not in grasp_to_mat4x4:
                 grasp_ = particles[grasp_name_]
-                grasp_to_mat4x4[grasp_name_] = self.grasp_to_mat4x4_fn(grasp_)
+                # grasp_ has shape (n, 4, 4) or (n, 4) or (n, 6)
+                if grasp_.shape[1:3] == (4, 4):
+                    grasp_to_mat4x4[grasp_name_] = grasp_
+                else:
+                    grasp_to_mat4x4[grasp_name_] = self.grasp_to_mat4x4_fn(grasp_)
             return grasp_to_mat4x4[grasp_name_]
 
         # Object poses in world frame for every timestep

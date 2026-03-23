@@ -23,6 +23,22 @@ from .franka import (
     get_franka_gripper_spheres,
     franka_neutral_joint_positions,
     load_franka_rerun,
+    fr3_franka_neutral_joint_positions,
+    get_fr3_franka_kinematics_model,
+    get_fr3_franka_gripper_spheres,
+    load_fr3_franka_rerun,
+)
+from .franka_robotiq import (
+    load_fr3_robotiq_rerun,
+    fr3_robotiq_neutral_joint_positions,
+    get_fr3_robotiq_kinematics_model,
+    get_fr3_robotiq_gripper_spheres,
+    load_panda_robotiq_rerun,
+    panda_robotiq_neutral_joint_positions,
+    panda_robotiq_curobo_cfg,
+    get_panda_robotiq_kinematics_model,
+    get_panda_robotiq_gripper_spheres,
+    get_panda_robotiq_ik_solver,
 )
 from .ur5 import load_ur5_rerun, ur5_home, get_ur5_gripper_spheres, get_ur5_ik_solver, get_ur5_kinematics_model
 from .utils import RerunRobot
@@ -52,6 +68,48 @@ def load_panda_container(tensor_args: TensorDeviceType) -> RobotContainer:
     return RobotContainer("panda", kin_model, joint_limits, gripper_spheres, tool_from_ee)
 
 
+def load_fr3_franka_container(tensor_args: TensorDeviceType) -> RobotContainer:
+    kin_model = get_fr3_franka_kinematics_model()
+    joint_limits = kin_model.kinematics_config.joint_limits.position
+    assert joint_limits.shape == (2, 7), f"Invalid joint limits shape: {joint_limits.shape}"
+
+    gripper_spheres = get_fr3_franka_gripper_spheres(tensor_args)
+    tool_from_ee = torch.eye(4, device=tensor_args.device)
+    gripper_down_quat = tensor_args.to_device([0.0, 1.0, 0.0, 0.0])
+    tool_from_ee[:3, :3] = quaternion_to_matrix(gripper_down_quat[None])[0]
+    tool_from_ee[:3, 3] = tensor_args.to_device([0.0, 0.0, 0.105])
+    return RobotContainer("fr3_franka", kin_model, joint_limits, gripper_spheres, tool_from_ee)
+
+
+def load_panda_robotiq_container(tensor_args: TensorDeviceType) -> RobotContainer:
+    kin_model = get_panda_robotiq_kinematics_model()
+    joint_limits = kin_model.kinematics_config.joint_limits.position
+    assert joint_limits.shape == (2, 7), f"Invalid joint limits shape: {joint_limits.shape}"
+
+    gripper_spheres = get_panda_robotiq_gripper_spheres(tensor_args)
+    tool_from_ee = torch.eye(4, device=tensor_args.device)
+    rpy = tensor_args.to_device([torch.pi, 0, torch.pi / 2])
+    tool_from_ee[:3, :3] = roma.euler_to_rotmat("XYZ", rpy)
+    tool_from_ee[:3, 3] = tensor_args.to_device([0.0, 0.0, 0.015])
+    return RobotContainer("panda_robotiq", kin_model, joint_limits, gripper_spheres, tool_from_ee)
+
+
+def load_fr3_robotiq_container(tensor_args: TensorDeviceType) -> RobotContainer:
+    kin_model = get_fr3_robotiq_kinematics_model()
+    joint_limits = kin_model.kinematics_config.joint_limits.position
+    assert joint_limits.shape == (2, 7), f"Invalid joint limits shape: {joint_limits.shape}"
+
+    gripper_spheres = get_fr3_robotiq_gripper_spheres(tensor_args)
+    tool_from_ee = torch.eye(4, device=tensor_args.device)
+    # Should match UR5 which also uses Robotiq
+    rpy = tensor_args.to_device([torch.pi, 0, torch.pi / 2])
+    tool_from_ee[:3, :3] = roma.euler_to_rotmat("XYZ", rpy)
+    # The Robotiq gripper goes down when closing, so we move the tool frame up by 1.5cm
+    # Note: this is based on our Robotiq coupling, it may need minor tuning based on your setup.
+    tool_from_ee[:3, 3] = tensor_args.to_device([0.0, 0.0, 0.015])
+    return RobotContainer("fr3_robotiq", kin_model, joint_limits, gripper_spheres, tool_from_ee)
+
+
 def load_ur5_container(tensor_args: TensorDeviceType) -> RobotContainer:
     kin_model = get_ur5_kinematics_model()
     joint_limits = kin_model.kinematics_config.joint_limits.position
@@ -72,6 +130,21 @@ robot_to_fns = {
         "rerun": load_franka_rerun,
         "q_home": franka_neutral_joint_positions[:7],  # exclude gripper joint
         "container": load_panda_container,
+    },
+    "fr3_franka": {
+        "rerun": load_fr3_franka_rerun,
+        "q_home": fr3_franka_neutral_joint_positions,
+        "container": load_fr3_franka_container,
+    },
+    "panda_robotiq": {
+        "rerun": load_panda_robotiq_rerun,
+        "q_home": panda_robotiq_neutral_joint_positions,
+        "container": load_panda_robotiq_container,
+    },
+    "fr3_robotiq": {
+        "rerun": load_fr3_robotiq_rerun,
+        "q_home": fr3_robotiq_neutral_joint_positions,  # include gripper joint
+        "container": load_fr3_robotiq_container,
     },
     "ur5": {
         "rerun": load_ur5_rerun,

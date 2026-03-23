@@ -17,11 +17,14 @@ class TAMPConfiguration:
     num_particles: int = 1024
 
     # Robot embodiment to use
-    robot: Literal["panda", "ur5"] = "panda"
+    robot: Literal["panda", "fr3_robotiq", "ur5", "panda_robotiq", "fr3_franka"] = "panda"
 
     # Grasp and Placements
     grasp_dof: Literal[4, 6] = 4
     place_dof: Literal[4] = 4
+
+    # M2T2 Grasps which will be used first, and then grasp_dof fallback
+    m2t2_grasps: bool = False
 
     # Approach to use. Note: optimization includes particle initialization (i.e., sampling)
     approach: Literal["optimization", "sampling"] = "optimization"
@@ -37,10 +40,18 @@ class TAMPConfiguration:
     ## Advanced args - for soft cost experiments. Warning! Might cause unexpected behavior if not used correctly.
     # Maximum time for optimization or sampling in seconds before breaking
     max_loop_dur: Optional[float] = None
+    # Proportion satisfying to break for optimization
+    prop_satisfying_break: Optional[float] = None
     # Whether to break upon finding a satisfying particle
     break_on_satisfying: bool = True
     # Whether we're running stick button experiment. Modifies heuristic for comparing baselines
     stick_button_experiment: bool = False
+
+    ## Experimental Stuff
+    # Whether to check placements using AABB or OBB formulation
+    placement_check: Literal["aabb", "obb"] = "aabb"
+    # Distance to shrink the placement region check on all sides, only supported for OBB right now
+    placement_shrink_dist: Optional[float] = None
 
     ## Soft Costs
     optimize_soft_costs: bool = False
@@ -101,7 +112,7 @@ class TAMPConfiguration:
 def validate_tamp_config(config: TAMPConfiguration):
     if config.num_particles <= 0:
         raise ValueError(f"num_particles must be positive, not {config.num_particles}")
-    if config.robot not in {"panda", "ur5"}:
+    if config.robot not in {"panda", "fr3_robotiq", "ur5", "panda_robotiq", "fr3_franka"}:
         raise ValueError(f"Invalid embodiment: {config.robot}")
     if config.grasp_dof not in {4, 6}:
         raise ValueError(f"Invalid grasp_dof: {config.grasp_dof}")
@@ -139,3 +150,9 @@ def validate_tamp_config(config: TAMPConfiguration):
         raise ValueError(f"world_activation_distance must be non-negative, not {config.world_activation_distance}")
     if config.movable_activation_distance < 0:
         raise ValueError(f"movable_activation_distance must be non-negative, not {config.movable_activation_distance}")
+
+    # Placement region checks
+    if config.placement_check != "obb" and config.placement_shrink_dist is not None:
+        raise NotImplementedError(
+            f"placement_shrink_dist only supported with placement_check = obb, not {config.placement_check}"
+        )

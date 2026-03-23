@@ -6,7 +6,7 @@
 # disclosure or distribution of this material and related documentation
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
-
+import logging
 from collections import defaultdict
 from typing import Dict
 
@@ -27,6 +27,8 @@ from roma import quat_wxyz_to_xyzw, unitquat_to_rotmat
 
 from cutamp.envs import TAMPEnvironment
 from cutamp.utils.shapes import MultiSphere
+
+_log = logging.getLogger(__name__)
 
 Particles = Dict[str, Float[torch.Tensor, "num_particles *h d"]]
 
@@ -155,6 +157,8 @@ def approximate_goal_aabb(goal: Obstacle) -> Float[torch.Tensor, "2 3"]:
 
 def get_world_cfg(env: TAMPEnvironment, include_movables: bool = False) -> WorldConfig:
     """Get the cuRobo WorldConfig from the TAMP environment."""
+    from cutamp.utils.obb import get_object_obb
+
     geoms = defaultdict(list)
     obstacles = env.movables if include_movables else []
     obstacles += env.statics
@@ -172,4 +176,29 @@ def get_world_cfg(env: TAMPEnvironment, include_movables: bool = False) -> World
             geoms["mesh"].append(obj)
         else:
             raise ValueError(f"Unknown object type: {type(obj)}")
-    return WorldConfig(**geoms)
+    world_cfg = WorldConfig(**geoms)
+
+    # IMPORTANT! We monkey patch the get_cuboid on mesh because cuRobo's implementation is super wacky.
+    # This makes it an issue when motion planning as the default OBBs can be significant over-approximations.
+    for mesh in world_cfg.mesh:
+        mesh_obb = get_object_obb(mesh)
+        xyz = mesh_obb.center.tolist()
+        quat_wxyz = mesh_obb.quat_wxyz.tolist()
+        pose = [*xyz, *quat_wxyz]
+        dims = (mesh_obb.half_extents * 2).tolist()
+
+        cuboid = Cuboid(
+            name=mesh.name,
+            pose=pose,
+            dims=dims,
+            color=mesh.color,
+            texture=mesh.texture,
+            material=mesh.material,
+            tensor_args=mesh.tensor_args,
+        )
+
+        # Monkey patch: replace get_cuboid to return our custom cuboid
+        mesh.get_cuboid = lambda c=cuboid: c
+        _log.debug(f"Monkey patched get_cuboid on mesh {mesh.name}")
+
+    return world_cfg

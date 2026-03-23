@@ -10,6 +10,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Optional
 
 import omegaconf
 import yaml
@@ -33,8 +34,8 @@ class _OmegaConfEncoder(json.JSONEncoder):
 class ExperimentLogger:
     """Simple experiment logger."""
 
-    def __init__(self, name: str, config: TAMPConfiguration):
-        self.exp_dir = Path(config.experiment_root) / name
+    def __init__(self, name: str, config: TAMPConfiguration, experiment_dir: Optional[Path] = None):
+        self.exp_dir = experiment_dir if experiment_dir is not None else Path(config.experiment_root) / name
         if self.exp_dir.exists():
             _log.warning(f"Experiment directory {self.exp_dir} already exists")
         self.exp_dir.mkdir(parents=True, exist_ok=True)

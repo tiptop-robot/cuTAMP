@@ -6,7 +6,8 @@
 # disclosure or distribution of this material and related documentation
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
-
+import cProfile
+import logging
 import os
 from typing import Optional
 
@@ -19,13 +20,14 @@ from cutamp.envs.book_shelf import load_book_shelf_env
 from cutamp.envs.stick_button import load_stick_button_env
 from cutamp.envs.tetris import load_tetris_env
 from cutamp.envs.utils import get_env_dir, load_env
-
 from cutamp.scripts.utils import (
     default_constraint_to_mult,
     default_constraint_to_tol,
     setup_logging,
     get_tetris_tuned_constraint_to_mult,
 )
+
+_log = logging.getLogger(__name__)
 
 
 def load_demo_env(name: str) -> TAMPEnvironment:
@@ -38,6 +40,9 @@ def load_demo_env(name: str) -> TAMPEnvironment:
         env = load_stick_button_env()
     elif name == "blocks":
         env_path = os.path.join(get_env_dir(), "obstacle_blocks_large_region.yml")
+        env = load_env(env_path)
+    elif name == "blocks_rotate":
+        env_path = os.path.join(get_env_dir(), "obstacle_blocks_rotated_region.yml")
         env = load_env(env_path)
     elif name == "unpack":
         env_path = os.path.join(get_env_dir(), "unpack_3.yml")
@@ -76,10 +81,20 @@ def entrypoint():
         "--env",
         help="Environment name to run",
         default="tetris_3",
-        choices=["tetris_1", "tetris_2", "tetris_3", "tetris_5", "book_shelf", "stick_button", "blocks", "unpack"],
+        choices=[
+            "tetris_1",
+            "tetris_2",
+            "tetris_3",
+            "tetris_5",
+            "book_shelf",
+            "stick_button",
+            "blocks",
+            "blocks_rotate",
+            "unpack",
+        ],
     )
     parser.add_argument(
-        "-n", "--num_particles", type=int, default=1024, help="Number of particles to use (i.e. batch size)"
+        "-n", "--num_particles", type=int, default=512, help="Number of particles to use (i.e. batch size)"
     )
 
     # Soft costs
@@ -93,7 +108,7 @@ def entrypoint():
     )
 
     # Robot and grasp
-    parser.add_argument("--robot", default="panda", choices=["panda", "ur5"], help="Robot to use")
+    parser.add_argument("--robot", default="fr3_robotiq", choices=["panda", "panda_robotiq", "fr3_robotiq", "ur5", "fr3_franka"], help="Robot to use")
     parser.add_argument(
         "--grasp_dof",
         type=int,
@@ -164,6 +179,19 @@ def entrypoint():
         "--tuned_tetris_weights", action="store_true", help="Use weights tuned on tetris_5 for constraint multipliers."
     )
 
+    # Profiling
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable profiling with cProfile. Output can be visualized with snakeviz.",
+    )
+    parser.add_argument(
+        "--profile_output",
+        type=str,
+        default="cutamp_profile.prof",
+        help="Output file for profiling data.",
+    )
+
     # We only expose a subset of the full TAMPConfiguration. Check config.py for the full configuration.
     args = parser.parse_args()
     config = TAMPConfiguration(
@@ -183,12 +211,35 @@ def entrypoint():
         opt_viz_interval=args.viz_interval,
         viz_robot_mesh=not args.disable_robot_mesh,
         experiment_root=args.experiment_root,
+        # Note: these are new features with this fork of cuTAMP
+        placement_check="obb",
+        placement_shrink_dist=0.02,
+        prop_satisfying_break=0.1,
     )
     validate_tamp_config(config)
 
     # Load env and run demo
     env = load_demo_env(args.env)
-    cutamp_demo(env, config, experiment_id=args.experiment_id, use_tetris_tuned_weights=args.tuned_tetris_weights)
+
+    # Profile if required
+    if args.profile:
+        print(f"Profiling enabled. Output will be saved to {args.profile_output}")
+        profiler = cProfile.Profile()
+        profiler.enable()
+    else:
+        profiler = None
+
+    cutamp_demo(
+        env,
+        config,
+        experiment_id=args.experiment_id,
+        use_tetris_tuned_weights=args.tuned_tetris_weights,
+    )
+
+    if profiler is not None:
+        profiler.disable()
+        profiler.dump_stats(args.profile_output)
+        _log.info(f"Profile results saved to {args.profile_output}")
 
 
 if __name__ == "__main__":
