@@ -14,21 +14,28 @@ from typing import Sequence, Protocol, List
 from cutamp.task_planning import Operator, GroundOperator
 
 
-@dataclass(frozen=True)
+# Global cache for interning ground TAMP operators
+_GROUND_OP_CACHE: dict[tuple, "GroundTAMPOperator"] = {}
+
+
+@dataclass(frozen=True, eq=False)
 class TAMPOperator(Operator):
-    constraints: Sequence["Constraint"] = field(default_factory=list)
-    costs: Sequence["Cost"] = field(default_factory=list)
+    constraints: Sequence["Constraint"] = field(default_factory=tuple)
+    costs: Sequence["Cost"] = field(default_factory=tuple)
 
     def ground(self, substitutions: dict[str, str]) -> "GroundTAMPOperator":
-        ground_operator: GroundOperator = super().ground(substitutions)
-        # Ground constraints and costs
-        ground_constraints = [con.ground(substitutions) for con in self.constraints]
-        ground_costs = [cost.ground(substitutions) for cost in self.costs]
+        cache_key = tuple(sorted(substitutions.items()))
+        if cache_key not in _GROUND_OP_CACHE:
+            ground_operator: GroundOperator = super().ground(substitutions)
+            # Ground constraints and costs
+            ground_constraints = tuple(con.ground(substitutions) for con in self.constraints)
+            ground_costs = tuple(cost.ground(substitutions) for cost in self.costs)
+            ground_tamp_operator = GroundTAMPOperator(
+                **ground_operator.__dict__, constraints=ground_constraints, costs=ground_costs
+            )
+            _GROUND_OP_CACHE[cache_key] = ground_tamp_operator
 
-        ground_tamp_operator = GroundTAMPOperator(
-            **ground_operator.__dict__, constraints=ground_constraints, costs=ground_costs
-        )
-        return ground_tamp_operator
+        return _GROUND_OP_CACHE[cache_key]
 
 
 @dataclass(frozen=True)

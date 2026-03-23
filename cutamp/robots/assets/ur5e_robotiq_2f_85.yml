@@ -120,18 +120,22 @@ robot_cfg:
         - center: [ 0.001, 0.001, -0.029 ]
           radius: 0.043
         # willshen: these correspond to camera mount and realsense (no cables modeled)
-        - center: [ 0.02, -0.06, 0.0]
-          radius: 0.02
-        - center: [ -0.02, -0.06, 0.0]
-          radius: 0.02
-        - center: [ 0.0175, -0.1, 0.005 ]
-          radius: 0.0175
-        - center: [ -0.0175, -0.1, 0.005 ]
-          radius: 0.0175
-        - center: [ 0.0175, -0.135, 0.01 ]
-          radius: 0.0175
-        - center: [ -0.0175, -0.135, 0.01 ]
-          radius: 0.0175
+        - center: [ 0.02, -0.06, 0.005]
+          radius: 0.0275
+        - center: [ -0.02, -0.06, 0.005]
+          radius: 0.0275
+        - center: [ -0.06, -0.06, 0.005 ]
+          radius: 0.0275
+        - center: [ 0.02, -0.1, 0.0225 ]
+          radius: 0.025
+        - center: [ -0.02, -0.1, 0.0225 ]
+          radius: 0.025
+        - center: [ -0.06, -0.1, 0.0225 ]
+          radius: 0.025
+#        - center: [ 0.0175, -0.135, 0.01 ]
+#          radius: 0.0175
+#        - center: [ -0.0175, -0.135, 0.01 ]
+#          radius: 0.0175
 
       tool0:
         - center: [ 0.001, 0.001, 0.05 ]

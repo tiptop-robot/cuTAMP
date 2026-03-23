@@ -47,6 +47,12 @@ class ParticleOptimizer:
         self.constraint_checker = constraint_checker
         self.get_satisfying_mask = self.constraint_checker.get_mask
 
+        self.num_satisfying_break = (
+            int(self.config.prop_satisfying_break * self.config.num_particles)
+            if self.config.prop_satisfying_break is not None
+            else None
+        )
+
         # Types to optimize
         self.types_to_optimize = {Pose, Conf}
         self.opt_counter = 0
@@ -79,8 +85,9 @@ class ParticleOptimizer:
         param_groups = []
         param_msg = []
         for param, val in particles.items():
-            param_type = param_to_type[param]
+            param_type = param_to_type.get(param)
             if param_type not in self.types_to_optimize:
+                _log.debug(f"Skipping {param} from optimizer group")
                 continue
             if param == "q0":
                 continue  # we don't optimize the initial configuration
@@ -143,6 +150,13 @@ class ParticleOptimizer:
             costs = self.cost_reducer(cost_dict, consider_types=consider_types)
             satisfying_mask = self.get_satisfying_mask(cost_dict, verbose=False)
             num_satisfying = satisfying_mask.sum().item()
+            # If num satisfying bigger than desired proportion, break
+            if self.num_satisfying_break is not None and num_satisfying >= self.num_satisfying_break:
+                _log.info(
+                    f"Found {num_satisfying} >= {self.num_satisfying_break} ({self.config.prop_satisfying_break * 100:.2f}%) satisfying particles "
+                )
+                break
+
             opt_metrics["num_satisfying"].append(num_satisfying)
 
             if num_satisfying > 0 and not found_solution:

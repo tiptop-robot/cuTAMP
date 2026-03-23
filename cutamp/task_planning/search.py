@@ -9,8 +9,8 @@
 
 import itertools
 import logging
-from collections import defaultdict
-from dataclasses import dataclass
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
 from typing import Generator, List, Optional, Sequence
 
 from cutamp.task_planning import Atom, GroundOperator, Operator, State
@@ -18,29 +18,58 @@ from cutamp.task_planning import Atom, GroundOperator, Operator, State
 _log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass
 class _Node:
     state: frozenset[Atom]
     parent: Optional["_Node"]
     operator: Optional[GroundOperator]
     depth: int
+    _cached_params: Optional[dict[str, set[str]]] = field(default=None, compare=False, hash=False, repr=False)
+    _cached_fluent_map: Optional[dict[str, set[Atom]]] = field(default=None, compare=False, hash=False, repr=False)
+
+    def fluent_to_atoms_map(self) -> dict[str, set[Atom]]:
+        """Returns a mapping from fluent names to their corresponding atoms in this state."""
+        if self._cached_fluent_map is None:
+            # Build the map more efficiently by pre-sizing and using direct dict operations
+            fluent_map = {}
+            for atom in self.state:
+                name = atom.name
+                if name in fluent_map:
+                    fluent_map[name].add(atom)
+                else:
+                    fluent_map[name] = {atom}
+            self._cached_fluent_map = fluent_map
+        return self._cached_fluent_map
 
     def parameters(self) -> dict[str, set[str]]:
         """Returns all the parameters ever encountered"""
-        param_type_to_literals = self.parent.parameters() if self.parent else defaultdict(set)
+        if self._cached_params is not None:
+            return self._cached_params
+
+        if self.parent:
+            # Shallow copy the dict and shallow copy each set
+            param_type_to_literals = {k: v.copy() for k, v in self.parent.parameters().items()}
+        else:
+            param_type_to_literals = defaultdict(set)
 
         # All the literals in the state
         for atom in self.state:
             param_types = [param.type for param in atom.fluent.parameters]
             literals = atom.values
             for param_type, literal in zip(param_types, literals):
+                if param_type not in param_type_to_literals:
+                    param_type_to_literals[param_type] = set()
                 param_type_to_literals[param_type].add(literal)
 
         # All the literals in the operator
         if self.operator is not None:
             for param, values in zip(self.operator.operator.parameters, self.operator.values):
+                if param.type not in param_type_to_literals:
+                    param_type_to_literals[param.type] = set()
                 param_type_to_literals[param.type].add(values)
 
+        # Cache the result
+        self._cached_params = param_type_to_literals
         return param_type_to_literals
 
     def extract_solution(self) -> list[GroundOperator]:
@@ -55,7 +84,10 @@ class _Node:
 
 
 def get_valid_ground_operators(
-    node: _Node, operators: Sequence[Operator], verbose: bool = False
+    node: _Node,
+    operators: Sequence[Operator],
+    operator_precond_fluents: Sequence[frozenset[str]],
+    verbose: bool = False,
 ) -> list[GroundOperator]:
     """
     Get all valid ground operators by testing the operators, binding samples for the unspecified variables, and
@@ -64,13 +96,27 @@ def get_valid_ground_operators(
     ground_ops = []
     state = node.state
 
-    # Fluent names to their corresponding atoms
-    fluent_to_atoms: dict[str, set[Atom]] = defaultdict(set)
-    for atom in state:
-        fluent_to_atoms[atom.name].add(atom)
+    # Use cached fluent-to-atoms mapping from the node
+    fluent_to_atoms = node.fluent_to_atoms_map()
+
+    # Pre-filter operators based on precondition fluent availability
+    # Skip operators whose required fluents don't exist in the current state
+    # Use pre-computed precondition fluent sets for faster subset checking
+    available_fluent_names = frozenset(fluent_to_atoms.keys())
+    relevant_operators = [
+        op
+        for op, pre_fluents in zip(operators, operator_precond_fluents)
+        if pre_fluents.issubset(available_fluent_names)
+    ]
+
+    if verbose and len(relevant_operators) < len(operators):
+        _log.debug(
+            f"Filtered operators from {len(operators)} to {len(relevant_operators)} "
+            f"based on available fluents: {available_fluent_names}"
+        )
 
     # For each operator, we try to ground it given the current state
-    for operator in operators:
+    for operator in relevant_operators:
         # FIXME: this sampling is slow once we have lots of plan skeletons, so improve it in the future
         # Got to do it inside here so we reset for each operator
         param_type_to_literals = node.parameters()
@@ -102,6 +148,8 @@ def get_valid_ground_operators(
 
         def sample_param_type(param_type: str) -> str:
             new_sample = _sample_param_type(param_type)
+            if param_type not in param_type_to_literals:
+                param_type_to_literals[param_type] = set()
             param_type_to_literals[param_type].add(new_sample)
             return new_sample
 
@@ -156,7 +204,9 @@ def get_valid_ground_operators(
             substitutions = dict(zip(param_names, combo))
             ground_op = operator.ground(substitutions)
 
-            # Check preconditions are satisfied
+            # Check preconditions are satisfied for this specific parameter combination
+            # Note: We checked fluent availability earlier, but not all parameter combinations
+            # will have their preconditions satisfied in the state
             if not ground_op.preconditions.issubset(state):
                 if verbose:
                     _log.debug(f"Skipping {ground_op} because not all preconditions are satisfied.")
@@ -205,12 +255,15 @@ def breadth_first_search(
         if not isinstance(elem, Atom):
             raise ValueError(f"Goal state must contain only atoms, got {elem.__class__.__name__} {elem}")
 
+    # Pre-compute precondition fluent sets for each operator (optimization)
+    operator_precond_fluents = [frozenset(pre.name for pre in op.preconditions) for op in operators]
+
     initial_node = _Node(state=initial_state, parent=None, operator=None, depth=0)
-    frontier: list[_Node] = [initial_node]
+    frontier: deque[_Node] = deque([initial_node])
     explored: set[State] = {initial_node.state}
 
     while frontier:
-        node = frontier.pop(0)
+        node = frontier.popleft()
         if verbose:
             _log.debug(f"Exploring node: {node}")
 
@@ -222,7 +275,7 @@ def breadth_first_search(
                 continue  # stop exploring this branch as we already satisfied the goal
 
         # Get successor and add to frontier
-        ground_ops = get_valid_ground_operators(node, operators, verbose=verbose)
+        ground_ops = get_valid_ground_operators(node, operators, operator_precond_fluents, verbose=verbose)
         for ground_op in ground_ops:
             successor_state = ground_op.apply(node.state)
 

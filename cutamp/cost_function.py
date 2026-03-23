@@ -8,15 +8,16 @@
 # its affiliates is strictly prohibited.
 
 import itertools
+import logging
 import warnings
 from collections import defaultdict
 from typing import Dict, Union
 
 import roma
 import torch
-from curobo.rollout.cost.self_collision_cost import SelfCollisionCost, SelfCollisionCostConfig
 from jaxtyping import Float
 
+from curobo.rollout.cost.self_collision_cost import SelfCollisionCost, SelfCollisionCostConfig
 from cutamp.config import TAMPConfiguration
 from cutamp.costs import curobo_pose_error, dist_from_bounds_jit, sphere_to_sphere_overlap, trajectory_length
 from cutamp.rollout import Rollout
@@ -36,6 +37,9 @@ from cutamp.task_planning.constraints import (
 )
 from cutamp.task_planning.costs import GraspCost, TrajectoryLength
 from cutamp.utils.common import transform_spheres
+from cutamp.utils.obb import get_object_obb
+
+_log = logging.getLogger(__name__)
 
 
 class CostFunction:
@@ -109,6 +113,7 @@ class CostFunction:
 
         # Compute the AABB and surface z-position for the placement surfaces
         self.surface_to_aabb = {}
+        self.surface_to_obb = {}
         self.surface_to_target_z = {}
         self.surface_to_objs = defaultdict(list)
         for con in self.stable_placement_constraints:
@@ -117,12 +122,19 @@ class CostFunction:
             if surface in self.surface_to_aabb:
                 continue
 
-            aabb = world.get_aabb(surface)  # includes xyz
-            aabb_xy = aabb[:, :2]
-            self.surface_to_aabb[surface] = aabb_xy
+            if self.config.placement_check == "aabb":
+                aabb = world.get_aabb(surface)  # includes xyz
+                aabb_xy = aabb[:, :2]
+                self.surface_to_aabb[surface] = aabb_xy
+                surface_z = aabb[1, 2]
+            else:
+                assert self.config.placement_check == "obb"
+                surface_obj = world.get_object(surface)
+                obb = get_object_obb(surface_obj, shrink_dist=config.placement_shrink_dist)
+                self.surface_to_obb[surface] = obb
+                surface_z = obb.surface_z
 
-            # For the target z, need to take collision activation distance into account
-            surface_z = aabb[1, 2]
+            # For target z, need to take collision activation distance into account
             target_z = surface_z + world.collision_activation_distance + 2e-3  # add some buffer
             self.surface_to_target_z[surface] = target_z
 
@@ -179,6 +191,41 @@ class CostFunction:
             raise ValueError("Expected q0 to be the first conf")
         self.traj_length_confs = self.traj_length_confs[1:]
 
+        # Identify which objects are manipulated in the plan
+        self.activated_obj = set()
+        self.obj_to_first_place = {}
+        for ground_op in plan_skeleton:
+            op_name = ground_op.operator.name
+            if op_name == "Pick":
+                obj = ground_op.values[0]
+                self.activated_obj.add(obj)
+            elif op_name == "Place":
+                obj = ground_op.values[0]
+                pose = ground_op.values[2]
+                self.activated_obj.add(obj)
+                if obj not in self.obj_to_first_place:
+                    self.obj_to_first_place[obj] = pose
+            elif op_name == "PushStick" or op_name == "Push":
+                raise NotImplementedError(f"Haven't handled {op_name}")
+            else:
+                assert op_name == "MoveFree" or op_name == "MoveHolding"
+
+        # Pre-compute movable object pairs for collision checking.
+        # Only include pairs where at least one object is manipulated
+        movable_names = [m.name for m in self.world.movables]
+        all_movable_pairs = list(itertools.combinations(movable_names, 2)) if len(movable_names) > 1 else []
+        self.movable_obj_pairs = [
+            (obj_1, obj_2)
+            for obj_1, obj_2 in all_movable_pairs
+            if obj_1 in self.activated_obj or obj_2 in self.activated_obj
+        ]
+        pairs_msg = ", ".join(f"({o_1}, {o_2})" for o_1, o_2 in self.movable_obj_pairs)
+        _log.debug(f"Checking movable collisions between {pairs_msg}")
+
+        # Populated upon validating the rollout
+        self.obj_to_first_pose_ts = {}
+        self.pair_to_first_pose_ts = {}
+
     def _validate_rollout(self, rollout: Rollout):
         """Checks structure of the rollout conforms to the assumptions we make in the cost function implementation."""
         if self._rollout_validated:
@@ -199,6 +246,21 @@ class CostFunction:
         # Trajectory length parameters should match
         if self.traj_length_confs != rollout["conf_params"]:
             raise RuntimeError(f"Expected conf params {self.traj_length_confs} but got {rollout['conf_params']}")
+
+        # Bad-ish hack to get the first point at which the object is activated
+        for obj, action in self.obj_to_first_place.items():
+            self.obj_to_first_pose_ts[obj] = rollout["action_to_pose_ts"][action]
+        for pair in self.movable_obj_pairs:
+            obj_1, obj_2 = pair
+            if obj_1 in self.obj_to_first_pose_ts and obj_2 in self.obj_to_first_pose_ts:
+                self.pair_to_first_pose_ts[pair] = min(
+                    self.obj_to_first_pose_ts[obj_1], self.obj_to_first_pose_ts[obj_2]
+                )
+            elif obj_1 in self.obj_to_first_pose_ts:
+                self.pair_to_first_pose_ts[pair] = self.obj_to_first_pose_ts[obj_1]
+            else:
+                assert obj_2 in self.obj_to_first_place
+                self.pair_to_first_pose_ts[pair] = self.obj_to_first_pose_ts[obj_2]
 
         self._rollout_validated = True
 
@@ -314,10 +376,35 @@ class CostFunction:
             spheres_xy = spheres[..., :2]
 
             # Within goal xy bounds, need to gather by the spheres for each object
-            in_goal_xy = dist_from_bounds_jit(spheres_xy, *self.surface_to_aabb[surface])
-            obj_in_goal_xy = torch.zeros((num_particles, len(objs)), dtype=in_goal_xy.dtype, device=in_goal_xy.device)
-            obj_in_goal_xy.scatter_add_(1, sphere_idx_map_expand, in_goal_xy)
-            support_vals[f"{surface}_in_xy"] = obj_in_goal_xy
+            if self.config.placement_check == "aabb":
+                in_goal_xy = dist_from_bounds_jit(spheres_xy, *self.surface_to_aabb[surface])
+                obj_in_goal_xy = torch.zeros(
+                    (num_particles, len(objs)), dtype=in_goal_xy.dtype, device=in_goal_xy.device
+                )
+                obj_in_goal_xy.scatter_add_(1, sphere_idx_map_expand, in_goal_xy)
+                support_vals[f"{surface}_in_xy"] = obj_in_goal_xy
+            else:
+                # Check spheres are within the OBB's xy plane by transforming to OBB local frame
+                obb = self.surface_to_obb[surface]
+
+                # Transform sphere centers to OBB local frame using cached rotation matrix
+                sphere_centers = spheres[..., :3]  # (b, n, 3)
+                centers_relative = sphere_centers - obb.center  # translate to OBB origin
+                centers_local = centers_relative @ obb.rot_matrix_inv.T  # rotate to OBB frame
+
+                # Now everything's in local frame just use AABB check
+                centers_xy = centers_local[..., :2]  # (b, n, 2)
+                # com_xy = centers_xy.mean(1)[:, None]
+                obb_xy_lower = -obb.half_extents[:2]
+                obb_xy_upper = obb.half_extents[:2]
+                in_goal_xy = dist_from_bounds_jit(centers_xy, obb_xy_lower, obb_xy_upper)
+
+                # Accumulate per-object distances
+                obj_in_goal_xy = torch.zeros(
+                    (num_particles, len(objs)), dtype=in_goal_xy.dtype, device=in_goal_xy.device
+                )
+                obj_in_goal_xy.scatter_add_(1, sphere_idx_map_expand, in_goal_xy)
+                support_vals[f"{surface}_in_xy"] = obj_in_goal_xy
 
             # Distance between bottom of spheres and z-position of the surface
             spheres_bottom = spheres[..., 2] - spheres[..., 3]
@@ -351,10 +438,11 @@ class CostFunction:
         coll_values = {"robot_to_world": self.world.collision_fn(robot_spheres)}
 
         # Collision between movables and world
-        all_movable_spheres = torch.cat(list(obj_to_spheres.values()), dim=2)
-        coll_values["movable_to_world"] = self.world.collision_fn(all_movable_spheres)
+        activated_movable_spheres = torch.cat([obj_to_spheres[obj] for obj in self.activated_obj], dim=2)
+        coll_values["movable_to_world"] = self.world.collision_fn(activated_movable_spheres)
 
         # Collision between robot and movables, need to expand poses to full timesteps
+        all_movable_spheres = torch.cat(list(obj_to_spheres.values()), dim=2)
         all_pose_ts = list(rollout["ts_to_pose_ts"].values())
         coll_values["robot_to_movables"] = sphere_to_sphere_overlap(
             robot_spheres,
@@ -362,17 +450,30 @@ class CostFunction:
             activation_distance=self.config.gripper_activation_distance,
         )
 
-        # TODO: this is slow and a bottleneck, could consider using curobo's fast sphere-to-sphere kernel
+        # TODO: this method could still be SIGNIFICANTLY sped up
         # Collision between movable objects
-        for obj_1, obj_2 in itertools.combinations(self.world.movables, 2):
-            obj_1_spheres = obj_to_spheres[obj_1.name]
-            obj_2_spheres = obj_to_spheres[obj_2.name]
-            coll_values[f"{obj_1.name}_to_{obj_2.name}"] = sphere_to_sphere_overlap(
-                obj_1_spheres,
-                obj_2_spheres,
+        if self.movable_obj_pairs:
+            # Stack into (num_pairs, b, t, n_spheres, 4)
+            obj_1_spheres_list = [obj_to_spheres[name1] for name1, _ in self.movable_obj_pairs]
+            obj_2_spheres_list = [obj_to_spheres[name2] for _, name2 in self.movable_obj_pairs]
+            obj_1_spheres_batched = torch.stack(obj_1_spheres_list, dim=0)
+            obj_2_spheres_batched = torch.stack(obj_2_spheres_list, dim=0)
+
+            collision_results = sphere_to_sphere_overlap(
+                obj_1_spheres_batched,
+                obj_2_spheres_batched,
                 activation_distance=self.config.movable_activation_distance,
                 use_aabb_check=True,
-            )
+            )  # (num_pairs, b, t)
+
+            for idx, pair in enumerate(self.movable_obj_pairs):
+                pair_cost = collision_results[idx]
+                pose_ts = self.pair_to_first_pose_ts[pair]
+                # Only consider costs from when the action was activated. This allows us to handle objects that
+                # are initially in-collision (perhaps due to bad perception)
+                pair_cost_filtered = pair_cost[:, pose_ts:]
+                name1, name2 = pair
+                coll_values[f"{name1}_to_{name2}"] = pair_cost_filtered
 
         coll_cost = {
             "type": "constraint",

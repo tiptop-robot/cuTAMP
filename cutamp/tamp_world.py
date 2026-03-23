@@ -6,11 +6,11 @@
 # disclosure or distribution of this material and related documentation
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
-
+import itertools
 import logging
 import warnings
 from functools import cached_property
-from typing import List, Literal, Dict, Union
+from typing import List, Literal, Dict, Union, Optional
 
 import torch
 from jaxtyping import Float
@@ -18,10 +18,13 @@ from jaxtyping import Float
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
 from curobo.geom.types import Obstacle
 from curobo.types.base import TensorDeviceType
+from curobo.wrap.reacher.ik_solver import IKSolver
 from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig
+from cutamp.costs import sphere_to_sphere_overlap
 from cutamp.envs import TAMPEnvironment
 from cutamp.robots import RobotContainer, load_robot_container
-from cutamp.robots.franka import franka_curobo_cfg, get_franka_ik_solver
+from cutamp.robots.franka_robotiq import get_fr3_robotiq_ik_solver, fr3_robotiq_curobo_cfg
+from cutamp.robots.franka import franka_curobo_cfg, get_franka_ik_solver, get_fr3_franka_ik_solver, fr3_franka_curobo_cfg
 from cutamp.robots.ur5 import ur5_curobo_cfg, get_ur5_ik_solver
 from cutamp.tamp_domain import get_initial_state
 from cutamp.task_planning import State
@@ -48,6 +51,7 @@ class TAMPWorld:
         collision_activation_distance: float = 0.0,
         coll_n_spheres: int = 50,
         coll_sphere_radius: float = 0.005,
+        ik_solver: Optional[IKSolver] = None,
     ):
         self.env = env
         self.tensor_args = tensor_args
@@ -71,8 +75,17 @@ class TAMPWorld:
         self.q_init = q_init
 
         # Setup the IK solver, right now it needs WorldCfg and I don't know the behavior, can speed up later
-        if self.robot_name == "panda":
+        if ik_solver is not None:
+            self.ik_solver = ik_solver
+            self.ik_solver.update_world(self.world_cfg)
+        elif self.robot_name == "panda":
             self.ik_solver = get_franka_ik_solver(self.world_cfg)
+        elif self.robot_name == "panda_robotiq":
+            self.ik_solver = get_franka_ik_solver(self.world_cfg)
+        elif self.robot_name == "fr3_robotiq":
+            self.ik_solver = get_fr3_robotiq_ik_solver(self.world_cfg)
+        elif self.robot_name == "fr3_franka":
+            self.ik_solver = get_fr3_franka_ik_solver(self.world_cfg)
         elif self.robot_name == "ur5":
             self.ik_solver = get_ur5_ik_solver(self.world_cfg)
         else:
@@ -163,6 +176,8 @@ class TAMPWorld:
         if obj_name not in self._obj_to_aabb:
             obj = self.get_object(obj_name)
             aabb = approximate_goal_aabb(obj).to(self.device)
+            # aabb[0, :2] += 0.02
+            # aabb[1, :2] -= 0.02
             self._obj_to_aabb[obj_name] = aabb
         return self._obj_to_aabb[obj_name]
 
@@ -188,6 +203,12 @@ class TAMPWorld:
         """
         if self.robot_name == "panda":
             robot_cfg = franka_curobo_cfg()
+        elif self.robot_name == "panda_robotiq":
+            robot_cfg = franka_curobo_cfg()
+        elif self.robot_name == "fr3_robotiq":
+            robot_cfg = fr3_robotiq_curobo_cfg()
+        elif self.robot_name == "fr3_franka":
+            robot_cfg = fr3_franka_curobo_cfg()
         elif self.robot_name == "ur5":
             robot_cfg = ur5_curobo_cfg()
         else:
@@ -209,7 +230,9 @@ class TAMPWorld:
         return motion_gen
 
 
-def check_tamp_world_not_in_collision(world: TAMPWorld, collision_tol: float = 1e-6):
+def check_tamp_world_not_in_collision(
+    world: TAMPWorld, collision_tol: float = 1e-6, movable_activation_dist: float = 0.0
+):
     """Check that the initial state of the movable objects are not in collision."""
     for obj in world.movables:
         # Transform spheres to world frame
@@ -219,6 +242,24 @@ def check_tamp_world_not_in_collision(world: TAMPWorld, collision_tol: float = 1
 
         coll_cost = world.collision_fn(spheres).sum()
         if coll_cost > collision_tol:
-            raise ValueError(f"Initial state in collision for object '{obj.name}' with cost {coll_cost}")
+            _log.warning(f"Initial state in collision for object '{obj.name}' with cost {coll_cost}")
+            # raise ValueError(f"Initial state in collision for object '{obj.name}' with cost {coll_cost}")
 
-    # TODO: catch collisions between spheres for each movable objects here
+    # Catch collisions between spheres for movable objects
+    obj_to_spheres = {}
+    for idx, obj in enumerate(world.movables):
+        obj_spheres = transform_spheres(world.get_collision_spheres(obj), world.get_object_pose(obj))
+        obj_to_spheres[obj.name] = obj_spheres
+
+    for obj_1, obj_2 in itertools.combinations(world.movables, 2):
+        obj_1_spheres = obj_to_spheres[obj_1.name]
+        obj_2_spheres = obj_to_spheres[obj_2.name]
+        coll_cost = sphere_to_sphere_overlap(
+            obj_1_spheres,
+            obj_2_spheres,
+            activation_distance=movable_activation_dist,
+            use_aabb_check=True,
+        )
+        if coll_cost > collision_tol:
+            _log.warning(f"Initial state in collision between {obj_1.name} and {obj_2.name} with cost {coll_cost}")
+            # raise ValueError(f"Initial state in collision between {obj_1.name} and {obj_2.name} with cost {coll_cost}")

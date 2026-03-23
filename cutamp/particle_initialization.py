@@ -40,16 +40,21 @@ _log = logging.getLogger(__name__)
 
 
 class ParticleInitializer:
-    def __init__(self, world: TAMPWorld, config: TAMPConfiguration):
+    def __init__(self, world: TAMPWorld, config: TAMPConfiguration, grasps: dict[str, dict] | None = None):
         if config.enable_traj:
             raise NotImplementedError("Trajectory initialization not yet supported")
         if config.place_dof != 4:
             raise NotImplementedError(f"Only 4-DOF grasp and placement supported for now, not {config.place_dof}")
         if config.grasp_dof != 4 and config.grasp_dof != 6:
             raise NotImplementedError(f"Only 4-DOF or 6-DOF grasp supported for now, not {config.grasp_dof}")
+        if not config.m2t2_grasps and grasps:
+            raise ValueError("M2T2 grasps is not enabled but got grasps")
         self.world = world
         self.config = config
         self.q_init = world.q_init.repeat(config.num_particles, 1)
+        if grasps is not None:
+            _log.info(f"Using provided grasps instead of built-in cuTAMP samplers")
+        self.grasps = grasps
 
         # Sampler caching
         self.pick_cache = {}
@@ -113,33 +118,86 @@ class ParticleInitializer:
                     log_debug(
                         f"{header}. Using cached grasp poses for {obj}. {ik_result.success.sum()}/{num_particles} success"
                     )
+                    particles[f"{grasp}_confidences"] = self.pick_cache[obj]["confidences"]
                     continue
 
                 # Sample grasps
                 obj_curobo = world.get_object(obj)
-                obj_spheres = world.get_collision_spheres(obj)
                 num_faces = 4 if isinstance(obj_curobo, Cuboid) else None
+                obj_spheres = world.get_collision_spheres(obj)
+                num_samples = num_particles * 2  # oversample at first
+                sampled_confs = None
+                is_mat4x4 = False
 
-                # Sample 4 times as many grasps as particles
-                if config.grasp_dof == 4:
-                    sampled_grasps = grasp_4dof_sampler(num_particles * 4, obj_curobo, obj_spheres, num_faces=num_faces)
+                if config.m2t2_grasps and self.grasps and len(self.grasps[obj]["grasps_obj"]) > 0:
+                    _log.debug(f"Using M2T2 grasps for {obj}")
+                    provided_grasps = self.grasps[obj]["grasps_obj"]
+                    confs = self.grasps[obj]["confidences_pt"]
+                    # Sample randomly with replacement if needed
+                    sample_idxs = torch.randint(
+                        0, provided_grasps.shape[0], (num_samples,), device=provided_grasps.device
+                    )
+                    sampled_grasps = provided_grasps[sample_idxs]
+                    sampled_confs = confs[sample_idxs]
+                    obj_from_grasp = sampled_grasps
+                    is_mat4x4 = True
+                elif config.grasp_dof == 4:
+                    _log.debug(f"Falling back to 4-DOF heuristic grasps for {obj}")
+                    sampled_grasps = grasp_4dof_sampler(num_samples, obj_curobo, obj_spheres, num_faces=num_faces)
                     obj_from_grasp = action_4dof_to_mat4x4(sampled_grasps)
                 else:
-                    sampled_grasps = grasp_6dof_sampler(num_particles * 4, obj_curobo, num_faces=num_faces)
+                    _log.debug(f"Falling back to 6-DOF heuristic grasps for {obj}")
+                    sampled_grasps = grasp_6dof_sampler(num_samples, obj_curobo, num_faces=num_faces)
                     obj_from_grasp = action_6dof_to_mat4x4(sampled_grasps)
 
-                # Select the grasps that are not in collision with the object
+                # Filter grasps by collision with object
                 grasp_spheres = transform_spheres(world.robot_container.gripper_spheres, obj_from_grasp)
-                grasp_coll = sphere_to_sphere_overlap(obj_spheres, grasp_spheres)
-                good_idxs = grasp_coll.topk(num_particles, largest=False).indices
-                particles[grasp] = sampled_grasps[good_idxs]
+                grasp_coll = sphere_to_sphere_overlap(obj_spheres, grasp_spheres, activation_distance=0.0)
+
+                # Select grasps: use collision-free only, or fall back to lowest collision
+                collision_free_mask = grasp_coll <= 1e-2
+                if collision_free_mask.any():
+                    # Use only collision-free grasps, sorted by confidence if available
+                    cfree_grasps = sampled_grasps[collision_free_mask]
+
+                    if sampled_confs is not None:
+                        cfree_confs = sampled_confs[collision_free_mask]
+                        sort_idxs = torch.argsort(cfree_confs, descending=True)[:num_particles]
+                        selected_grasps = cfree_grasps[sort_idxs]
+                        selected_confs = cfree_confs[sort_idxs]
+                    else:
+                        selected_grasps = cfree_grasps[:num_particles]
+                        selected_confs = None
+                else:
+                    # No collision-free grasps, take lowest collision scores
+                    best_idxs = grasp_coll.topk(num_particles, largest=False).indices
+                    selected_grasps = sampled_grasps[best_idxs]
+                    selected_confs = sampled_confs[best_idxs] if sampled_confs is not None else None
+
+                # Sample with replacement if we don't have enough grasps
+                if selected_grasps.shape[0] < num_particles:
+                    sample_idxs = torch.randint(
+                        0, selected_grasps.shape[0], (num_particles,), device=selected_grasps.device
+                    )
+                    selected_grasps = selected_grasps[sample_idxs]
+                    if selected_confs is not None:
+                        selected_confs = selected_confs[sample_idxs]
+
+                particles[grasp] = selected_grasps
+                particles[f"{grasp}_confidences"] = selected_confs
 
                 # Transform grasps to hand frame
                 if config.random_init:
                     q_sample = sample_between_bounds(num_particles, world.robot_container.joint_limits)
                     particles[q] = q_sample
                 else:
-                    obj_from_grasp = obj_from_grasp[good_idxs]
+                    obj_from_grasp = particles[grasp]
+                    if not is_mat4x4:
+                        obj_from_grasp = (
+                            action_4dof_to_mat4x4(obj_from_grasp)
+                            if config.grasp_dof == 4
+                            else action_6dof_to_mat4x4(obj_from_grasp)
+                        )
                     world_from_obj = pose_list_to_mat4x4(obj_curobo.pose).to(world.tensor_args.device)
                     world_from_grasp = world_from_obj @ obj_from_grasp
                     world_from_ee = world_from_grasp @ world.tool_from_ee
@@ -155,7 +213,11 @@ class ParticleInitializer:
 
                 # Store in cache
                 if config.cache_subgraphs:
-                    self.pick_cache[obj] = {"sampled_grasps": particles[grasp], "ik_result": ik_result}
+                    self.pick_cache[obj] = {
+                        "sampled_grasps": particles[grasp],
+                        "ik_result": ik_result,
+                        "confidences": particles[f"{grasp}_confidences"],
+                    }
 
             # Place
             elif op_name == Place.name:
@@ -193,15 +255,23 @@ class ParticleInitializer:
                 obj_curobo = world.get_object(obj)
                 obj_spheres = world.get_collision_spheres(obj)
                 if config.random_init:
-                    yaw = sample_yaw(num_particles * 4, None, self.world.tensor_args.device)
+                    yaw = sample_yaw(num_particles * 2, None, self.world.tensor_args.device)
                     aabb = world.world_aabb.clone()
                     aabb[0, 2] = 0.0
                     aabb[1, 2] = max(aabb[1, 2], 0.2)
-                    xyz = sample_between_bounds(num_particles * 4, aabb)
+                    xyz = sample_between_bounds(num_particles * 2, aabb)
                     sampled_placements = torch.cat([xyz, yaw.unsqueeze(-1)], dim=1)
                 else:
                     surface_curobo = world.get_object(surface)
-                    sampled_placements = place_4dof_sampler(num_particles * 4, obj_curobo, obj_spheres, surface_curobo)
+                    sampled_placements = place_4dof_sampler(
+                        num_particles * 2,
+                        obj_curobo,
+                        obj_spheres,
+                        surface_curobo,
+                        surface_rep=self.config.placement_check,
+                        shrink_dist=self.config.placement_shrink_dist,
+                        collision_activation_dist=self.config.world_activation_distance,
+                    )
 
                 # Select the placements that are not in collision with the object
                 world_from_obj = action_4dof_to_mat4x4(sampled_placements)  # desired placement pose
@@ -219,7 +289,9 @@ class ParticleInitializer:
                 else:
                     # Get the hand pose given the placement pose in world frame.
                     # Need to take grasp into account to transform into hand frame.
-                    if config.grasp_dof == 4:
+                    if particles[grasp].shape[1:3] == (4, 4):  # (n, 4, 4) likely from M2T2
+                        obj_from_grasp = particles[grasp]
+                    elif config.grasp_dof == 4:
                         obj_from_grasp = action_4dof_to_mat4x4(particles[grasp])
                     else:
                         obj_from_grasp = action_6dof_to_mat4x4(particles[grasp])

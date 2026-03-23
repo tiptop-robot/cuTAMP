@@ -72,8 +72,10 @@ class ConstraintChecker:
                 overall_mask = mask if overall_mask is None else overall_mask & mask
 
                 if verbose:
-                    _log.debug(
-                        f"[{cost_type}] {name} <= {tol} has {mask.sum()}/{mask.shape[0]} satisfying, "
+                    num_satis = mask.sum()
+                    _log_fn = _log.warning if num_satis == 0 else _log.debug
+                    _log_fn(
+                        f"[{cost_type}] {name} <= {tol} has {num_satis}/{mask.shape[0]} satisfying, "
                         f"{overall_mask.sum()} remaining"
                     )
 

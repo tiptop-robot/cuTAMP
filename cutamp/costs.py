@@ -10,9 +10,8 @@
 from typing import Optional
 
 import torch
-from jaxtyping import Float
-
 from curobo.types.math import Pose
+from jaxtyping import Float
 
 
 def trajectory_length(
@@ -74,19 +73,24 @@ def get_aabb_from_spheres(spheres: Float[torch.Tensor, "*b n 4"]) -> Float[torch
 def _sphere_to_sphere_overlap(
     spheres_1: Float[torch.Tensor, "b *h 4"],
     spheres_2: Float[torch.Tensor, "b *h 4"],
-    activation_distance: float | None = None,
+    activation_distance: float,
 ) -> Float[torch.Tensor, "b *h"]:
     """Compute the overlap volume between two sets of spheres. Can be used as a collision distance function."""
     centers_1, radii_1 = spheres_1[..., :3], spheres_1[..., 3]
     centers_2, radii_2 = spheres_2[..., :3], spheres_2[..., 3]
 
-    dist_matrix = torch.cdist(centers_1, centers_2)
-    radii_sum = radii_1.unsqueeze(-1) + radii_2.unsqueeze(-2)
-    overlap = radii_sum - dist_matrix
+    # Manual distance computation - more efficient than cdist for fusing with torch.compile
+    # Shape: [..., n1, 1, 3] - [..., 1, n2, 3] -> [..., n1, n2, 3]
+    diff = centers_1.unsqueeze(-2) - centers_2.unsqueeze(-3)
+    dist_sq = (diff * diff).sum(dim=-1)
+    dist = torch.sqrt(dist_sq + 1e-8)  # add epsilon for numerical stability
 
-    if activation_distance is not None:
-        overlap += activation_distance
-    return torch.relu(overlap).sum((-2, -1))
+    # Compute penetration depth
+    radii_sum = radii_1.unsqueeze(-1) + radii_2.unsqueeze(-2)
+    penetration = radii_sum - dist + activation_distance
+
+    # Return sum of positive penetrations
+    return torch.relu(penetration).sum((-2, -1))
 
 
 def sphere_to_sphere_overlap(
@@ -101,8 +105,10 @@ def sphere_to_sphere_overlap(
     Compute the overlap volume between two sets of spheres. Can be used as a collision distance function. If
     use_aabb_check=True, we compute the overlap only for batches of spheres that have intersecting AABBs.
     """
+    # Convert None to 0.0 for compiled function
+    act_dist = 0.0 if activation_distance is None else activation_distance
     if not use_aabb_check:
-        return _sphere_to_sphere_overlap(spheres_1, spheres_2, activation_distance)
+        return _sphere_to_sphere_overlap(spheres_1, spheres_2, act_dist)
 
     # Compute AABB for each batch of spheres
     if aabb_1 is None:
@@ -118,7 +124,7 @@ def sphere_to_sphere_overlap(
     output = torch.zeros_like(intersect, dtype=torch.float32)  # [b, *h]
     if intersect.any():
         # Only compute overlap for intersecting AABBs
-        output[intersect] = _sphere_to_sphere_overlap(spheres_1[intersect], spheres_2[intersect], activation_distance)
+        output[intersect] = _sphere_to_sphere_overlap(spheres_1[intersect], spheres_2[intersect], act_dist)
     return output
 
 

@@ -22,17 +22,18 @@ from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
 from jaxtyping import Float
 from yourdfpy import URDF
 
-from cutamp.robots.utils import RerunRobot
+from cutamp.robots.utils import RerunRobot, get_robotiq_2f_85_gripper_spheres
 
-# or simplified: (0, -1.57, 1.57, -1.57, -1.57, 0)
-ur5_home = (0, -torch.pi / 2, torch.pi / 2, -torch.pi / 2, -torch.pi / 2, 0)
+# or simplified: (0.0, -1.57, 1.57, -1.57, -1.57, 0)
+ur5_home = (0.0, -torch.pi / 2, torch.pi / 2, -torch.pi / 2, -torch.pi / 2, 0.0)
 
 
 @lru_cache(maxsize=1)
 def ur5_curobo_cfg() -> dict:
     assets_dir = Path(__file__).parent / "assets"
     # Note: use ur5e_robotiq_2f_85.yml for UR5e with camera mount (on MIT setup)
-    cfg = load_yaml(str(assets_dir / "ur5e_robotiq_2f_85_wo_camera.yml"))
+    cfg = load_yaml(str(assets_dir / "ur5e_robotiq_2f_85.yml"))
+    # cfg = load_yaml(str(assets_dir / "ur5e_robotiq_2f_85_wo_camera.yml"))
     # Set some asset paths so cuRobo can load our URDF and meshes
     keys = ["external_asset_path", "external_robot_configs_path"]
     for key in keys:
@@ -78,14 +79,7 @@ def get_ur5_ik_solver(
 
 def get_ur5_gripper_spheres(tensor_args: TensorDeviceType = TensorDeviceType()) -> Float[torch.Tensor, "num_spheres 4"]:
     """Collision spheres for UR5e with Robotiq 2F-85 gripper. Note: the spheres are in the origin frame with z-up."""
-    assets_dir = Path(__file__).parent / "assets"
-    spheres_pt = assets_dir / "ur5_robotiq_2f_85_gripper_spheres.pt"
-    if not spheres_pt.exists():
-        raise FileNotFoundError(f"File not found: {spheres_pt}")
-
-    spheres = torch.load(spheres_pt, map_location=tensor_args.device)
-    assert spheres.ndim == 2 and spheres.shape[1] == 4, f"Invalid shape for UR5 spheres: {spheres.shape}"
-    return spheres
+    return get_robotiq_2f_85_gripper_spheres(tensor_args)
 
 
 def load_ur5_rerun(load_mesh: bool = True) -> RerunRobot:
@@ -104,3 +98,23 @@ def load_ur5_rerun(load_mesh: bool = True) -> RerunRobot:
 
     urdf = URDF.load(urdf_path, filename_handler=_locate_curobo_asset)
     return RerunRobot("ur5", urdf, q_neutral=ur5_home, load_mesh=load_mesh)
+
+
+if __name__ == "__main__":
+    import rerun as rr
+
+    rr.init("ur5_test", spawn=True)
+    ur5 = load_ur5_rerun()
+
+    kin_model = get_ur5_kinematics_model()
+
+    q = torch.tensor(ur5_home, device="cuda")[None]
+    state = kin_model.get_state(q)
+
+    spheres = state.link_spheres_tensor[0].cpu()
+    xyz, radii = spheres[:, :3], spheres[:, 3]
+    rr.log("spheres", rr.Points3D(positions=xyz, radii=radii))
+
+    # Visualize gripper spheres
+    gripper_spheres = get_ur5_gripper_spheres().cpu()
+    rr.log("gripper_spheres", rr.Points3D(positions=gripper_spheres[:, :3], radii=gripper_spheres[:, 3]))

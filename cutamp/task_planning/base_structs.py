@@ -8,7 +8,10 @@
 # its affiliates is strictly prohibited.
 
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Sequence, Tuple
+
+# Global cache for interning ground atoms
+_ATOM_CACHE: dict[tuple, "Atom"] = {}
 
 
 @dataclass(frozen=True)
@@ -46,13 +49,22 @@ class Fluent:
         if not values:
             if self.parameters:
                 raise ValueError(f"Expected {len(self.parameters)} values, got 0")
-            return Atom(self)
+            # Cache zero-parameter atoms too
+            cache_key = (self.name, ())
+            if cache_key not in _ATOM_CACHE:
+                _ATOM_CACHE[cache_key] = Atom(self)
+            return _ATOM_CACHE[cache_key]
 
         if len(self.parameters) != len(values):
             raise ValueError(f"Expected {len(self.parameters)} values, got {len(values)}")
 
-        values = [val.name if isinstance(val, Parameter) else val for val in values]
-        return Atom(self, values)
+        values_tuple = tuple(val.name if isinstance(val, Parameter) else val for val in values)
+
+        # Check cache first
+        cache_key = (self.name, values_tuple)
+        if cache_key not in _ATOM_CACHE:
+            _ATOM_CACHE[cache_key] = Atom(self, values_tuple)
+        return _ATOM_CACHE[cache_key]
 
     def __str__(self) -> str:
         param_str = ", ".join(str(param) for param in self.parameters)
@@ -67,19 +79,25 @@ class Atom:
     """Represents a fluent with concrete values (no variables)."""
 
     fluent: Fluent
-    values: Sequence[str] = field(default_factory=list)
+    values: Tuple[str, ...] = field(default_factory=tuple)
+    _cached_str: str = field(default=None, init=False, compare=False, repr=False, hash=False)
+    _cached_hash: int = field(default=None, init=False, compare=False, repr=False, hash=False)
+
+    def __post_init__(self):
+        """Eagerly compute and cache string representation and hash."""
+        val_str = ", ".join(str(val) for val in self.values)
+        object.__setattr__(self, "_cached_str", f"{self.name}({val_str})")
+        object.__setattr__(self, "_cached_hash", hash(self._cached_str))
 
     @property
     def name(self) -> str:
         return self.fluent.name
 
     def __str__(self) -> str:
-        val_str = ", ".join(str(val) for val in self.values)
-        return f"{self.name}({val_str})"
+        return self._cached_str
 
     def __hash__(self) -> int:
-        # Atom identity is defined by its string representation
-        return hash(str(self))
+        return self._cached_hash
 
     def __eq__(self, other):
         # Equality also based on string representation (same fluent + same values)
@@ -96,8 +114,9 @@ def _ground_fluents(fluents: Sequence[Fluent], substitutions: dict[str, str]) ->
     """Helper method to ground a sequence of fluents with given substitutions."""
     ground_atoms = set()
     for fluent in fluents:
-        param_names = [param.name for param in fluent.parameters]
-        values = [substitutions[name] for name in param_names]
+        param_names = tuple(param.name for param in fluent.parameters)
+        values = tuple(substitutions[name] for name in param_names)
+        # Let fluent.ground() handle caching to avoid double-counting
         ground_atoms.add(fluent.ground(*values))
     return ground_atoms
 
@@ -117,7 +136,7 @@ class Operator:
         # Order substitutions by parameter name
         substitutions = {param.name: substitutions[param.name] for param in self.parameters}
         ground_name = f"{self.name}({', '.join(substitutions.values())})"
-        return GroundOperator(
+        ground_op = GroundOperator(
             name=ground_name,
             values=list(substitutions.values()),
             operator=self,
@@ -125,6 +144,7 @@ class Operator:
             add_effects=_ground_fluents(self.add_effects, substitutions),
             del_effects=_ground_fluents(self.del_effects, substitutions),
         )
+        return ground_op
 
     def __str__(self) -> str:
         param_str = ", ".join(str(param) for param in self.parameters)
