@@ -675,11 +675,17 @@ def run_cutamp(
                 failure_reason = "No valid plan skeletons found for the given goal"
         elif failure_reason is None:
             # Had plans but no satisfying particles (or timed out)
-            failure_reason = (
-                f"No satisfying particles found after optimizing {len(plan_queue)} plan(s) "
-                f"({overall_metrics['num_optimized_plans']} optimized, "
-                f"budget: {config.max_loop_dur}s / {config.num_opt_steps} steps)"
-            )
+            optimized = overall_metrics["num_optimized_plans"]
+            total = len(plan_queue)
+            if optimized < total:
+                failure_reason = (
+                    f"No satisfying particles found after optimizing "
+                    f"{optimized}/{total} plan(s) (time budget {config.max_loop_dur}s exceeded)"
+                )
+            else:
+                failure_reason = (
+                    f"No satisfying particles found after optimizing all {total} plan(s)"
+                )
         _log.warning(failure_reason)
     _log.debug(f"Best cost: {overall_metrics['best_cost']:.4f}, soft cost: {overall_metrics['best_soft_cost']:.4f}")
 
