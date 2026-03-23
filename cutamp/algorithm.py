@@ -445,6 +445,9 @@ def run_cutamp(
 
     sort_plans()
     _log.info(f"Num plans: {len(plan_queue)}, num skipped: {num_skipped_plans}")
+
+    curobo_plan = None
+    failure_reason = None
     overall_metrics = {
         "num_optimized_plans": 0,
         "num_initial_plans": plan_count,
@@ -454,7 +457,6 @@ def run_cutamp(
         "best_cost": float("inf"),
         "best_soft_cost": float("inf"),
     }
-    curobo_plan = None
     found_solution = False
     particle_optimizer = ParticleOptimizer(config, cost_reducer, constraint_checker)
     timer.start("first_solution")
@@ -640,6 +642,12 @@ def run_cutamp(
                         break
                     except MotionPlanningError as e:
                         _log.warning(f"Failed to motion plan: {e}")
+                else:
+                    # All satisfying particles failed motion planning
+                    if curobo_plan is None:
+                        failure_reason = (
+                            f"Motion planning failed for all {num_satisfying} satisfying particle(s)"
+                        )
 
             overall_metrics["num_satisfying_final"] = metrics["num_satisfying_final"]
             overall_metrics["final_plan_skeleton"] = [str(op) for op in plan_skeleton]
@@ -660,7 +668,25 @@ def run_cutamp(
     opt_elapsed = timer.stop("start_optimization")
     _log.debug(f"Optimization loop took roughly {opt_elapsed:.2f}s")
     if not found_solution:
-        _log.warning("No satisfying particles found after optimizing all plans")
+        if len(plan_queue) == 0:
+            if num_skipped_plans > 0:
+                failure_reason = f"All {num_skipped_plans} plan skeleton(s) failed particle initialization"
+            else:
+                failure_reason = "No valid plan skeletons found for the given goal"
+        elif failure_reason is None:
+            # Had plans but no satisfying particles (or timed out)
+            optimized = overall_metrics["num_optimized_plans"]
+            total = len(plan_queue)
+            if optimized < total:
+                failure_reason = (
+                    f"No satisfying particles found after optimizing "
+                    f"{optimized}/{total} plan(s) (time budget {config.max_loop_dur}s exceeded)"
+                )
+            else:
+                failure_reason = (
+                    f"No satisfying particles found after optimizing all {total} plan(s)"
+                )
+        _log.warning(failure_reason)
     _log.debug(f"Best cost: {overall_metrics['best_cost']:.4f}, soft cost: {overall_metrics['best_soft_cost']:.4f}")
 
     # Dump metrics out
@@ -671,4 +697,4 @@ def run_cutamp(
     # Log constraint and cost multipliers
     exp_logger.log_dict("multipliers", cost_reducer.cost_config)
     exp_logger.log_dict("tolerances", constraint_checker.constraint_config)
-    return curobo_plan, overall_metrics["num_satisfying_final"]
+    return curobo_plan, overall_metrics["num_satisfying_final"], failure_reason
