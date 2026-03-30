@@ -9,6 +9,7 @@
 
 import json
 import logging
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -20,6 +21,45 @@ from cutamp.envs import TAMPEnvironment
 from cutamp.envs.utils import get_env_dict
 
 _log = logging.getLogger(__name__)
+_GIT_CWD = Path(__file__).parent
+
+
+def _collect_git_info() -> dict:
+    """Return git commit hash and dirty status for metadata."""
+    try:
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=_GIT_CWD,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        dirty = bool(
+            subprocess.check_output(
+                ["git", "status", "--porcelain"],
+                cwd=_GIT_CWD,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        )
+        return {"commit": commit, "dirty": dirty}
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        _log.warning("Failed to collect git info", exc_info=True)
+        return {"commit": None, "dirty": None}
+
+
+def _get_git_diff() -> str | None:
+    """Return the full git diff against HEAD, or None if unavailable or empty."""
+    try:
+        diff = subprocess.check_output(
+            ["git", "diff", "HEAD"],
+            cwd=_GIT_CWD,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        return diff if diff else None
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        _log.warning("Failed to get git diff", exc_info=True)
+        return None
 
 
 class _OmegaConfEncoder(json.JSONEncoder):
@@ -44,6 +84,15 @@ class ExperimentLogger:
         # Save the config
         with open(self.exp_dir / "config.yml", "w") as f:
             yaml.dump(config.__dict__, f, sort_keys=False)
+
+        # Save git info and diff if dirty
+        git_info = _collect_git_info()
+        with open(self.exp_dir / "git_info.json", "w") as f:
+            json.dump(git_info, f, indent=2)
+        if git_info["dirty"]:
+            diff = _get_git_diff()
+            if diff:
+                (self.exp_dir / "git.diff").write_text(diff, encoding="utf-8")
 
     def log_dict(self, name: str, data: dict) -> Path:
         path = self.exp_dir / f"{name}.json"
