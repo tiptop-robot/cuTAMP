@@ -25,7 +25,7 @@ _GIT_CWD = Path(__file__).parent
 
 
 def _collect_git_info() -> dict:
-    """Return git commit hash and dirty status for metadata."""
+    """Return git commit hash, dirty status, and porcelain status for metadata."""
     try:
         commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
@@ -33,18 +33,17 @@ def _collect_git_info() -> dict:
             stderr=subprocess.DEVNULL,
             text=True,
         ).strip()
-        dirty = bool(
-            subprocess.check_output(
-                ["git", "status", "--porcelain"],
-                cwd=_GIT_CWD,
-                stderr=subprocess.DEVNULL,
-                text=True,
-            ).strip()
+        porcelain = subprocess.check_output(
+            ["git", "status", "--porcelain"],
+            cwd=_GIT_CWD,
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
-        return {"commit": commit, "dirty": dirty}
+        dirty = bool(porcelain.strip())
+        return {"commit": commit, "dirty": dirty, "porcelain": porcelain.strip() if dirty else None}
     except (FileNotFoundError, subprocess.CalledProcessError):
         _log.warning("Failed to collect git info", exc_info=True)
-        return {"commit": None, "dirty": None}
+        return {"commit": None, "dirty": None, "porcelain": None}
 
 
 def _get_git_diff() -> str | None:
