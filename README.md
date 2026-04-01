@@ -1,5 +1,7 @@
 # cuTAMP: Differentiable GPU-Parallelized Task and Motion Planning
 
+> **Note:** This is a fork of the original [cuTAMP](https://github.com/NVlabs/cuTAMP) with modifications to support [TiPToP](https://tiptop-robot.github.io). See [CHANGELOG.md](CHANGELOG.md) for version history.
+
 ### [🌐 Project Website](https://cutamp.github.io) | [📝 Paper](https://arxiv.org/abs/2411.11833)
 
 > **Differentiable GPU-Parallelized Task and Motion Planning**  

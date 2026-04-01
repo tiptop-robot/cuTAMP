@@ -6,3 +6,10 @@
 # disclosure or distribution of this material and related documentation
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
+
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("cutamp")
+except PackageNotFoundError:
+    __version__ = "unknown"
