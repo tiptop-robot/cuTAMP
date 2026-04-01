@@ -71,7 +71,7 @@ def solve_curobo(
     for obj, obj_pose in obj_to_current_pose.items():
         motion_gen.world_coll_checker.enable_obstacle(enable=True, name=obj)
         obj_pose = obj_to_current_pose[obj]
-        motion_gen.world_collision.update_obstacle_pose(obj, Pose.from_matrix(obj_pose), update_cpu_reference=True)
+        motion_gen.world_collision.update_obstacle_pose(obj, Pose.from_matrix(obj_pose))
 
     visualizer.set_time_seconds(timeline, ts)
     visualizer.set_joint_positions(best_particle["q0"])
@@ -198,7 +198,7 @@ def solve_curobo(
                 pts = spheres[:, :3].cpu().numpy()
                 n_radius = spheres[:, 3].cpu().numpy()
 
-                obj_pose = Pose.from_list(self.pose, self.tensor_args)
+                obj_pose = Pose.from_matrix(obj_to_current_pose[obj])
                 pre_transform_pose = kwargs["pre_transform_pose"]
                 if pre_transform_pose is not None:
                     obj_pose = pre_transform_pose.multiply(obj_pose)  # convert object pose to another frame
@@ -364,9 +364,7 @@ def solve_curobo(
                 motion_gen.detach_object_from_robot("attached_object")
                 motion_gen.world_coll_checker.enable_obstacle(enable=True, name=obj)
                 obj_pose = obj_to_current_pose[obj]
-                motion_gen.world_collision.update_obstacle_pose(
-                    obj, Pose.from_matrix(obj_pose), update_cpu_reference=True
-                )
+                motion_gen.world_collision.update_obstacle_pose(obj, Pose.from_matrix(obj_pose))
 
             # Open the gripper for visualization purposes
             if config.robot == "ur5" or config.robot == "fr3_robotiq":
