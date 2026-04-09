@@ -661,7 +661,6 @@ def run_cutamp(
                 # start of the next skeleton's resampling loop.
                 _log.info(f"Motion refinement failed for skeleton {[op.name for op in plan_skeleton]}, trying next")
                 should_break = False
-                failure_reason = None
             elif config.break_on_satisfying:
                 should_break = True
 
@@ -677,6 +676,10 @@ def run_cutamp(
 
     opt_elapsed = timer.stop("start_optimization")
     _log.debug(f"Optimization loop took roughly {opt_elapsed:.2f}s")
+    if found_solution and config.curobo_plan and curobo_plan is None:
+        found_solution = False
+        if failure_reason is None:
+            failure_reason = "Motion planning failed for all skeletons with satisfying particles"
     if not found_solution:
         if len(plan_queue) == 0:
             if num_skipped_plans > 0:
