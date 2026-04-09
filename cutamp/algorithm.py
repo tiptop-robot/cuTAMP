@@ -647,8 +647,9 @@ def run_cutamp(
                 else:
                     # All attempted particles failed motion planning
                     if curobo_plan is None:
+                        max_reached = " (max attempts reached)" if max_attempts < num_satisfying else ""
                         failure_reason = (
-                            f"Motion planning failed for {max_attempts}/{num_satisfying} satisfying particle(s)"
+                            f"Motion planning failed for {max_attempts}/{num_satisfying} satisfying particle(s){max_reached}"
                         )
 
             overall_metrics["num_satisfying_final"] = metrics["num_satisfying_final"]
