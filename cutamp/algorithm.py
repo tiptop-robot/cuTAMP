@@ -623,8 +623,9 @@ def run_cutamp(
                     _log.info(f"Updated motion gen with world cfg")
 
                 num_satisfying = ranked_particles["q0"].shape[0]
-                for curr_idx in range(num_satisfying):
-                    _log.info(f"Trying cuRobo planning with satisfying particle {curr_idx + 1}/{num_satisfying}")
+                max_attempts = min(config.max_motion_refine_attempts or num_satisfying, num_satisfying)
+                for curr_idx in range(max_attempts):
+                    _log.info(f"Trying cuRobo planning with satisfying particle {curr_idx + 1}/{max_attempts}")
                     curr_particle = {k: v[curr_idx] for k, v in ranked_particles.items()}
                     try:
                         curobo_plan = solve_curobo(
@@ -643,16 +644,20 @@ def run_cutamp(
                     except MotionPlanningError as e:
                         _log.warning(f"Failed to motion plan: {e}")
                 else:
-                    # All satisfying particles failed motion planning
+                    # All attempted particles failed motion planning
                     if curobo_plan is None:
                         failure_reason = (
-                            f"Motion planning failed for all {num_satisfying} satisfying particle(s)"
+                            f"Motion planning failed for {max_attempts}/{num_satisfying} satisfying particle(s)"
                         )
 
             overall_metrics["num_satisfying_final"] = metrics["num_satisfying_final"]
             overall_metrics["final_plan_skeleton"] = [str(op) for op in plan_skeleton]
             _log.debug(f"Total num satisfying {metrics['num_satisfying_final']}")
-            if config.break_on_satisfying:
+            if config.curobo_plan and curobo_plan is None:
+                # Motion refinement failed, try next skeleton
+                _log.info(f"Motion refinement failed for skeleton {[op.name for op in plan_skeleton]}, trying next")
+                should_break = False
+            elif config.break_on_satisfying:
                 should_break = True
 
         if should_break:
