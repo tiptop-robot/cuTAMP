@@ -15,6 +15,7 @@ from typing import Dict, Union
 
 import roma
 import torch
+from einops import rearrange
 from jaxtyping import Float
 
 from curobo.rollout.cost.self_collision_cost import SelfCollisionCost, SelfCollisionCostConfig
@@ -442,14 +443,14 @@ class CostFunction:
         # Collision between movables and world — batch all activated objects in one collision_fn call,
         # then mask out timesteps before each object's first placement (objects may initially be in
         # collision with surfaces they rest on, e.g. due to perception noise)
-        num_objs = len(self._activated_objs)
         stacked = torch.stack([obj_to_spheres[obj] for obj in self._activated_objs])  # (O, b, t, n, 4)
-        b, t, n = stacked.shape[1], stacked.shape[2], stacked.shape[3]
-        coll = self.world.collision_fn(stacked.reshape(num_objs * b, t, n, 4)).reshape(num_objs, b, t)
+        coll = self.world.collision_fn(rearrange(stacked, "O b t n d -> (O b) t n d"))  # (O*b, t)
+        coll = rearrange(coll, "(O b) t -> O b t", O=len(self._activated_objs))
 
         # Mask is fixed per skeleton — cache after first call
         if self._movable_world_mask is None:
-            mask = torch.ones(num_objs, 1, t, device=coll.device)
+            O, t = coll.shape[0], coll.shape[2]
+            mask = torch.ones(O, 1, t, device=coll.device)
             for i, obj in enumerate(self._activated_objs):
                 first_ts = self.obj_to_first_pose_ts[obj]
                 if first_ts > 0:
