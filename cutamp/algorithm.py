@@ -662,6 +662,7 @@ def run_cutamp(
                 # start of the next skeleton's resampling loop.
                 _log.info(f"Motion refinement failed for skeleton {[op.name for op in plan_skeleton]}, trying next")
                 should_break = False
+                failure_reason = None
             elif config.break_on_satisfying:
                 should_break = True
 
