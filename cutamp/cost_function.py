@@ -225,6 +225,8 @@ class CostFunction:
         # Populated upon validating the rollout
         self.obj_to_first_pose_ts = {}
         self.pair_to_first_pose_ts = {}
+        self._activated_objs = sorted(self.activated_obj)  # deterministic ordering for torch.stack
+        self._movable_world_mask = None  # lazily built in collision_costs
 
     def _validate_rollout(self, rollout: Rollout):
         """Checks structure of the rollout conforms to the assumptions we make in the cost function implementation."""
@@ -437,27 +439,24 @@ class CostFunction:
         robot_spheres = rollout["robot_spheres"]
         coll_values = {"robot_to_world": self.world.collision_fn(robot_spheres)}
 
-        # Collision between movables and world. We batch all activated objects into a single
-        # collision_fn call, then mask out timesteps before each object's first placement —
-        # objects may initially be in collision with surfaces they're resting on (e.g., perception noise)
-        activated_objs = list(self.activated_obj)
-        stacked_spheres = torch.stack(
-            [obj_to_spheres[obj] for obj in activated_objs]
-        )  # (num_objs, b, t, n, 4)
-        num_objs, b, t, n, _ = stacked_spheres.shape
-        coll = self.world.collision_fn(
-            stacked_spheres.reshape(num_objs * b, t, n, 4)
-        )  # (num_objs * b, t)
-        coll = coll.reshape(num_objs, b, t)
+        # Collision between movables and world — batch all activated objects in one collision_fn call,
+        # then mask out timesteps before each object's first placement (objects may initially be in
+        # collision with surfaces they rest on, e.g. due to perception noise)
+        num_objs = len(self._activated_objs)
+        stacked = torch.stack([obj_to_spheres[obj] for obj in self._activated_objs])  # (O, b, t, n, 4)
+        b, t, n = stacked.shape[1], stacked.shape[2], stacked.shape[3]
+        coll = self.world.collision_fn(stacked.reshape(num_objs * b, t, n, 4)).reshape(num_objs, b, t)
 
-        # Build mask to zero out timesteps before each object's first placement
-        mask = torch.ones(num_objs, 1, t, device=coll.device)
-        for i, obj in enumerate(activated_objs):
-            first_ts = self.obj_to_first_pose_ts[obj]
-            if first_ts > 0:
-                mask[i, :, :first_ts] = 0.0
+        # Mask is fixed per skeleton — cache after first call
+        if self._movable_world_mask is None:
+            mask = torch.ones(num_objs, 1, t, device=coll.device)
+            for i, obj in enumerate(self._activated_objs):
+                first_ts = self.obj_to_first_pose_ts[obj]
+                if first_ts > 0:
+                    mask[i, :, :first_ts] = 0.0
+            self._movable_world_mask = mask
 
-        coll_values["movable_to_world"] = (coll * mask).sum(0)  # (b, t)
+        coll_values["movable_to_world"] = (coll * self._movable_world_mask).sum(0)  # (b, t)
 
         # Collision between robot and movables, need to expand poses to full timesteps
         all_movable_spheres = torch.cat(list(obj_to_spheres.values()), dim=2)
