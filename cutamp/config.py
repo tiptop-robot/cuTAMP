@@ -86,6 +86,8 @@ class TAMPConfiguration:
     enable_traj: bool = False
     # Motion plan with cuRobo after optimization
     curobo_plan: bool = False
+    # Max satisfying particles to try motion refinement on per skeleton (None = try all)
+    max_motion_refine_attempts: Optional[int] = None
     # For slowing down cuRobo motion plans (0.5 is safe on the real robot)
     time_dilation_factor: Optional[float] = None
     # Whether to warmup IK solver
@@ -150,6 +152,10 @@ def validate_tamp_config(config: TAMPConfiguration):
         raise ValueError(f"world_activation_distance must be non-negative, not {config.world_activation_distance}")
     if config.movable_activation_distance < 0:
         raise ValueError(f"movable_activation_distance must be non-negative, not {config.movable_activation_distance}")
+
+    # Motion refinement
+    if config.max_motion_refine_attempts is not None and config.max_motion_refine_attempts <= 0:
+        raise ValueError(f"max_motion_refine_attempts must be positive or None, not {config.max_motion_refine_attempts}")
 
     # Placement region checks
     if config.placement_check != "obb" and config.placement_shrink_dist is not None:

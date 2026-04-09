@@ -151,6 +151,12 @@ def entrypoint():
         action="store_true",
         help="Whether to plan for full motions after using cuTAMP. Not supported in stick_button domain yet.",
     )
+    parser.add_argument(
+        "--max_motion_refine_attempts",
+        type=int,
+        default=None,
+        help="Max satisfying particles to try motion refinement on per skeleton. None = try all.",
+    )
 
     # Visualization and logging
     parser.add_argument(
@@ -209,6 +215,7 @@ def entrypoint():
         num_initial_plans=args.num_initial_plans,
         cache_subgraphs=args.cache_subgraphs,
         curobo_plan=args.motion_plan,
+        max_motion_refine_attempts=args.max_motion_refine_attempts,
         enable_visualizer=not args.disable_visualizer,
         opt_viz_interval=args.viz_interval,
         viz_robot_mesh=not args.disable_robot_mesh,

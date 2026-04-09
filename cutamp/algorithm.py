@@ -623,8 +623,9 @@ def run_cutamp(
                     _log.info(f"Updated motion gen with world cfg")
 
                 num_satisfying = ranked_particles["q0"].shape[0]
-                for curr_idx in range(num_satisfying):
-                    _log.info(f"Trying cuRobo planning with satisfying particle {curr_idx + 1}/{num_satisfying}")
+                max_attempts = min(config.max_motion_refine_attempts or num_satisfying, num_satisfying)
+                for curr_idx in range(max_attempts):
+                    _log.info(f"Trying cuRobo planning with satisfying particle {curr_idx + 1}/{max_attempts} ({num_satisfying} total satisfying)")
                     curr_particle = {k: v[curr_idx] for k, v in ranked_particles.items()}
                     try:
                         curobo_plan = solve_curobo(
@@ -639,20 +640,29 @@ def run_cutamp(
                             motion_gen=motion_gen,
                         )
                         _log.info("Successful plan found!")
+                        failure_reason = None
                         break
                     except MotionPlanningError as e:
                         _log.warning(f"Failed to motion plan: {e}")
                 else:
-                    # All satisfying particles failed motion planning
+                    # All attempted particles failed motion planning
                     if curobo_plan is None:
+                        max_reached = " (max attempts reached)" if max_attempts < num_satisfying else ""
                         failure_reason = (
-                            f"Motion planning failed for all {num_satisfying} satisfying particle(s)"
+                            f"Motion planning failed for {max_attempts}/{num_satisfying} satisfying particle(s){max_reached}"
                         )
 
             overall_metrics["num_satisfying_final"] = metrics["num_satisfying_final"]
             overall_metrics["final_plan_skeleton"] = [str(op) for op in plan_skeleton]
             _log.debug(f"Total num satisfying {metrics['num_satisfying_final']}")
-            if config.break_on_satisfying:
+            if config.curobo_plan and curobo_plan is None:
+                # Motion refinement failed, try next skeleton. Intentionally overrides should_break
+                # set by break_on_satisfying during resampling — we don't want to stop on a skeleton
+                # where motion planning failed. The max_loop_dur timeout will still be checked at the
+                # start of the next skeleton's resampling loop.
+                _log.info(f"Motion refinement failed for skeleton {[op.name for op in plan_skeleton]}, trying next")
+                should_break = False
+            elif config.break_on_satisfying:
                 should_break = True
 
         if should_break:
@@ -667,6 +677,10 @@ def run_cutamp(
 
     opt_elapsed = timer.stop("start_optimization")
     _log.debug(f"Optimization loop took roughly {opt_elapsed:.2f}s")
+    if found_solution and config.curobo_plan and curobo_plan is None:
+        found_solution = False
+        if failure_reason is None:
+            failure_reason = "Motion planning failed for all skeletons with satisfying particles"
     if not found_solution:
         if len(plan_queue) == 0:
             if num_skipped_plans > 0:
