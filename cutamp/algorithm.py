@@ -640,6 +640,7 @@ def run_cutamp(
                             motion_gen=motion_gen,
                         )
                         _log.info("Successful plan found!")
+                        failure_reason = None
                         break
                     except MotionPlanningError as e:
                         _log.warning(f"Failed to motion plan: {e}")
@@ -654,9 +655,13 @@ def run_cutamp(
             overall_metrics["final_plan_skeleton"] = [str(op) for op in plan_skeleton]
             _log.debug(f"Total num satisfying {metrics['num_satisfying_final']}")
             if config.curobo_plan and curobo_plan is None:
-                # Motion refinement failed, try next skeleton
+                # Motion refinement failed, try next skeleton. Intentionally overrides should_break
+                # set by break_on_satisfying during resampling — we don't want to stop on a skeleton
+                # where motion planning failed. The max_loop_dur timeout will still be checked at the
+                # start of the next skeleton's resampling loop.
                 _log.info(f"Motion refinement failed for skeleton {[op.name for op in plan_skeleton]}, trying next")
                 should_break = False
+                failure_reason = None
             elif config.break_on_satisfying:
                 should_break = True
 
