@@ -431,31 +431,33 @@ class CostFunction:
         }
         return traj_cost
 
-    def _movable_to_world_cost(
-        self, obj: str, obj_spheres: Float[torch.Tensor, "b t n 4"]
-    ) -> Float[torch.Tensor, "b t"]:
-        """Collision cost for a single movable object against the static world, zeroing out
-        timesteps before the object's first placement."""
-        coll = self.world.collision_fn(obj_spheres.contiguous())  # (b, num_pose_ts)
-        first_ts = self.obj_to_first_pose_ts[obj]
-        if first_ts > 0:
-            coll = coll.clone()
-            coll[:, :first_ts] = 0.0
-        return coll
-
     def collision_costs(self, rollout: Rollout, obj_to_spheres: Dict[str, Float[torch.Tensor, "b t n 4"]]) -> dict:
         """Collision costs. This could be tied better to the constraints and sped up significantly."""
         # Robot to world
         robot_spheres = rollout["robot_spheres"]
         coll_values = {"robot_to_world": self.world.collision_fn(robot_spheres)}
 
-        # Collision between movables and world. We check each object separately so we can mask out
-        # timesteps before the object's first placement — objects may initially be in collision with
-        # surfaces they're resting on (e.g., due to perception noise or collision activation distance)
-        movable_to_world_coll = sum(
-            self._movable_to_world_cost(obj, obj_to_spheres[obj]) for obj in self.activated_obj
-        )
-        coll_values["movable_to_world"] = movable_to_world_coll
+        # Collision between movables and world. We batch all activated objects into a single
+        # collision_fn call, then mask out timesteps before each object's first placement —
+        # objects may initially be in collision with surfaces they're resting on (e.g., perception noise)
+        activated_objs = list(self.activated_obj)
+        stacked_spheres = torch.stack(
+            [obj_to_spheres[obj] for obj in activated_objs]
+        )  # (num_objs, b, t, n, 4)
+        num_objs, b, t, n, _ = stacked_spheres.shape
+        coll = self.world.collision_fn(
+            stacked_spheres.reshape(num_objs * b, t, n, 4)
+        )  # (num_objs * b, t)
+        coll = coll.reshape(num_objs, b, t)
+
+        # Build mask to zero out timesteps before each object's first placement
+        mask = torch.ones(num_objs, 1, t, device=coll.device)
+        for i, obj in enumerate(activated_objs):
+            first_ts = self.obj_to_first_pose_ts[obj]
+            if first_ts > 0:
+                mask[i, :, :first_ts] = 0.0
+
+        coll_values["movable_to_world"] = (coll * mask).sum(0)  # (b, t)
 
         # Collision between robot and movables, need to expand poses to full timesteps
         all_movable_spheres = torch.cat(list(obj_to_spheres.values()), dim=2)
