@@ -1,0 +1,38 @@
+# Test environment for movable-to-world initial collision edge case.
+# Blocks are positioned so their collision spheres fall within a non-zero
+# world_activation_distance of the floor surface, triggering false initial
+# collision costs that the fix in _movable_to_world_cost should mask out.
+
+name: blocks_activation_dist_test
+geometries:
+  cuboid:
+    # Movables - block bottom slightly penetrates the floor surface (z=0.0)
+    # This simulates perception noise where detected object poses are slightly off.
+    # Block half-height = 0.025, so z=0.023 means bottom is at z=-0.002 (2mm into floor)
+    block0:
+      color: [244, 67, 54]
+      dims: [0.05, 0.05, 0.05]
+      pose: [0.55, -0.25, 0.023, 1.0, 0.0, 0.0, 0.0]
+    block1:
+      color: [33, 150, 243]
+      dims: [0.05, 0.05, 0.05]
+      pose: [0.55, 0.25, 0.023, 1.0, 0.0, 0.0, 0.0]
+
+    # Statics
+    floor:
+      color: [235, 196, 145]
+      dims: [1.3, 0.85, 0.04]
+      pose: [0.25, 0.0, -0.02, 1.0, 0.0, 0.0, 0.0]
+    goal:
+      color: [186, 255, 201]
+      dims: [0.5, 0.5, 0.01]
+      pose: [0.45, 0.0, 0.005, 1.0, 0.0, 0.0, 0.0]
+
+types:
+  Movable: [block0, block1]
+  Surface: [floor, goal]
+
+goal:
+  - "On": [block0, goal]
+  - "On": [block1, goal]
+  - HandEmpty: []
