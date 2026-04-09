@@ -625,7 +625,7 @@ def run_cutamp(
                 num_satisfying = ranked_particles["q0"].shape[0]
                 max_attempts = min(config.max_motion_refine_attempts or num_satisfying, num_satisfying)
                 for curr_idx in range(max_attempts):
-                    _log.info(f"Trying cuRobo planning with satisfying particle {curr_idx + 1}/{max_attempts}")
+                    _log.info(f"Trying cuRobo planning with satisfying particle {curr_idx + 1}/{max_attempts} ({num_satisfying} total satisfying)")
                     curr_particle = {k: v[curr_idx] for k, v in ranked_particles.items()}
                     try:
                         curobo_plan = solve_curobo(
