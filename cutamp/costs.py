@@ -7,11 +7,14 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 
+import logging
 from typing import Optional
 
 import torch
 from curobo.types.math import Pose
 from jaxtyping import Float
+
+_log = logging.getLogger(__name__)
 
 
 def trajectory_length(
@@ -70,27 +73,35 @@ def get_aabb_from_spheres(spheres: Float[torch.Tensor, "*b n 4"]) -> Float[torch
     return aabb
 
 
-def _sphere_to_sphere_overlap(
+def _sphere_to_sphere_overlap_pytorch(
     spheres_1: Float[torch.Tensor, "b *h 4"],
     spheres_2: Float[torch.Tensor, "b *h 4"],
     activation_distance: float,
 ) -> Float[torch.Tensor, "b *h"]:
-    """Compute the overlap volume between two sets of spheres. Can be used as a collision distance function."""
+    """PyTorch reference implementation. Materializes O(n1*n2) intermediate tensor."""
     centers_1, radii_1 = spheres_1[..., :3], spheres_1[..., 3]
     centers_2, radii_2 = spheres_2[..., :3], spheres_2[..., 3]
 
-    # Manual distance computation - more efficient than cdist for fusing with torch.compile
-    # Shape: [..., n1, 1, 3] - [..., 1, n2, 3] -> [..., n1, n2, 3]
     diff = centers_1.unsqueeze(-2) - centers_2.unsqueeze(-3)
     dist_sq = (diff * diff).sum(dim=-1)
-    dist = torch.sqrt(dist_sq + 1e-8)  # add epsilon for numerical stability
+    dist = torch.sqrt(dist_sq + 1e-8)
 
-    # Compute penetration depth
     radii_sum = radii_1.unsqueeze(-1) + radii_2.unsqueeze(-2)
     penetration = radii_sum - dist + activation_distance
 
-    # Return sum of positive penetrations
     return torch.relu(penetration).sum((-2, -1))
+
+
+try:
+    from cutamp.costs_warp import sphere_to_sphere_overlap_warp
+
+    _USE_WARP = True
+    _sphere_to_sphere_overlap = sphere_to_sphere_overlap_warp
+    _log.debug("Using Warp-accelerated sphere-to-sphere overlap")
+except ImportError:
+    _USE_WARP = False
+    _sphere_to_sphere_overlap = _sphere_to_sphere_overlap_pytorch
+    _log.warning("Warp not available, falling back to PyTorch sphere-to-sphere overlap")
 
 
 def sphere_to_sphere_overlap(

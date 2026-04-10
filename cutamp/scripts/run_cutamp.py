@@ -11,6 +11,8 @@ import logging
 import os
 from typing import Optional
 
+import torch
+
 from cutamp.algorithm import run_cutamp
 from cutamp.config import TAMPConfiguration, validate_tamp_config
 from cutamp.constraint_checker import ConstraintChecker
@@ -182,6 +184,17 @@ def entrypoint():
         help="Experiment ID for logging. Results will be saved in <experiment_root>/<experiment_id>",
     )
 
+    # Object collision spheres
+    parser.add_argument(
+        "--coll_n_spheres", type=int, default=50, help="Number of collision spheres per object."
+    )
+    parser.add_argument(
+        "--prop_satisfying_break",
+        type=float,
+        default=0.1,
+        help="Break optimization when this proportion of particles satisfy constraints. Set to 0 to disable.",
+    )
+
     # Tetris tuned weights
     parser.add_argument(
         "--tuned_tetris_weights", action="store_true", help="Use weights tuned on tetris_5 for constraint multipliers."
@@ -198,6 +211,17 @@ def entrypoint():
         type=str,
         default="cutamp_profile.prof",
         help="Output file for profiling data.",
+    )
+    parser.add_argument(
+        "--torch-profile",
+        action="store_true",
+        help="Enable GPU profiling with torch.profiler. Outputs a Chrome trace JSON viewable in chrome://tracing.",
+    )
+    parser.add_argument(
+        "--torch-profile-output",
+        type=str,
+        default="cutamp_torch_trace.json",
+        help="Output file for torch profiler Chrome trace.",
     )
 
     # We only expose a subset of the full TAMPConfiguration. Check config.py for the full configuration.
@@ -220,10 +244,11 @@ def entrypoint():
         opt_viz_interval=args.viz_interval,
         viz_robot_mesh=not args.disable_robot_mesh,
         experiment_root=args.experiment_root,
+        coll_n_spheres=args.coll_n_spheres,
         # Note: these are new features with this fork of cuTAMP
         placement_check="obb",
         placement_shrink_dist=0.02,
-        prop_satisfying_break=0.1,
+        prop_satisfying_break=args.prop_satisfying_break if args.prop_satisfying_break > 0 else None,
     )
     validate_tamp_config(config)
 
@@ -233,10 +258,22 @@ def entrypoint():
     # Profile if required
     if args.profile:
         print(f"Profiling enabled. Output will be saved to {args.profile_output}")
-        profiler = cProfile.Profile()
-        profiler.enable()
+        cprofile = cProfile.Profile()
+        cprofile.enable()
     else:
-        profiler = None
+        cprofile = None
+
+    if args.torch_profile:
+        print(f"Torch profiling enabled. Trace will be saved to {args.torch_profile_output}")
+        torch_profiler = torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+        )
+        torch_profiler.__enter__()
+    else:
+        torch_profiler = None
 
     cutamp_demo(
         env,
@@ -245,9 +282,16 @@ def entrypoint():
         use_tetris_tuned_weights=args.tuned_tetris_weights,
     )
 
-    if profiler is not None:
-        profiler.disable()
-        profiler.dump_stats(args.profile_output)
+    if torch_profiler is not None:
+        torch_profiler.__exit__(None, None, None)
+        torch_profiler.export_chrome_trace(args.torch_profile_output)
+        print(f"Torch profile trace saved to {args.torch_profile_output}")
+        # Also print a summary table sorted by CUDA time
+        print("\n" + torch_profiler.key_averages().table(sort_by="cuda_time_total", row_limit=30))
+
+    if cprofile is not None:
+        cprofile.disable()
+        cprofile.dump_stats(args.profile_output)
         _log.info(f"Profile results saved to {args.profile_output}")
 
 
