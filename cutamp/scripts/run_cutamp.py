@@ -46,6 +46,9 @@ def load_demo_env(name: str) -> TAMPEnvironment:
     elif name == "blocks_rotate":
         env_path = os.path.join(get_env_dir(), "obstacle_blocks_rotated_region.yml")
         env = load_env(env_path)
+    elif name == "blocks_tight":
+        env_path = os.path.join(get_env_dir(), "obstacle_blocks_tight_region.yml")
+        env = load_env(env_path)
     elif name == "unpack":
         env_path = os.path.join(get_env_dir(), "unpack_3.yml")
         env = load_env(env_path)
@@ -94,6 +97,7 @@ def entrypoint():
             "stick_button",
             "blocks",
             "blocks_rotate",
+            "blocks_tight",
             "unpack",
         ],
     )
@@ -112,7 +116,12 @@ def entrypoint():
     )
 
     # Robot and grasp
-    parser.add_argument("--robot", default="fr3_robotiq", choices=["panda", "panda_robotiq", "fr3_robotiq", "ur5", "fr3_franka"], help="Robot to use")
+    parser.add_argument(
+        "--robot",
+        default="fr3_robotiq",
+        choices=["panda", "panda_robotiq", "fr3_robotiq", "ur5", "fr3_franka"],
+        help="Robot to use",
+    )
     parser.add_argument(
         "--grasp_dof",
         type=int,
@@ -185,9 +194,7 @@ def entrypoint():
     )
 
     # Object collision spheres
-    parser.add_argument(
-        "--coll_n_spheres", type=int, default=50, help="Number of collision spheres per object."
-    )
+    parser.add_argument("--coll_n_spheres", type=int, default=50, help="Number of collision spheres per object.")
     parser.add_argument(
         "--prop_satisfying_break",
         type=float,
@@ -247,7 +254,7 @@ def entrypoint():
         coll_n_spheres=args.coll_n_spheres,
         # Note: these are new features with this fork of cuTAMP
         placement_check="obb",
-        placement_shrink_dist=0.02,
+        placement_shrink_dist=0.0,
         prop_satisfying_break=args.prop_satisfying_break if args.prop_satisfying_break > 0 else None,
     )
     validate_tamp_config(config)

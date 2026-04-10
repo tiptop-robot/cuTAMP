@@ -15,6 +15,7 @@ from typing import Dict, Union
 
 import roma
 import torch
+from einops import rearrange
 from jaxtyping import Float
 
 from curobo.rollout.cost.self_collision_cost import SelfCollisionCost, SelfCollisionCostConfig
@@ -467,13 +468,13 @@ class CostFunction:
         with torch.profiler.record_function("coll::robot_to_movables"):
             all_pose_ts = list(rollout["ts_to_pose_ts"].values())
             act_dist = self.config.gripper_activation_distance
-            robot_to_movables = torch.zeros(
-                robot_spheres.shape[0], robot_spheres.shape[1], device=robot_spheres.device
-            )
+            robot_to_movables = torch.zeros(robot_spheres.shape[0], robot_spheres.shape[1], device=robot_spheres.device)
             for obj_spheres in obj_to_spheres.values():
                 obj_spheres_t = obj_spheres[:, all_pose_ts]  # (b, t, n_obj, 4)
                 robot_to_movables = robot_to_movables + sphere_to_sphere_overlap(
-                    robot_spheres, obj_spheres_t, activation_distance=act_dist,
+                    robot_spheres,
+                    obj_spheres_t,
+                    activation_distance=act_dist,
                 )
             coll_values["robot_to_movables"] = robot_to_movables
 
