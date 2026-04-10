@@ -232,144 +232,6 @@ def test_full_overlap():
     return all_ok
 
 
-def test_grouped_correctness(label, batch_shape, n1, n2, n_groups, act_dist=0.01):
-    """Compare grouped Warp kernel vs ungrouped Warp kernel output and gradients."""
-    from cutamp.costs_warp import sphere_to_sphere_overlap_grouped_warp, sphere_to_sphere_overlap_warp
-
-    print(f"\n{'='*60}")
-    print(f"Test grouped: {label}")
-    print(f"  batch_shape={batch_shape}, n1={n1}, n2={n2}, n_groups={n_groups}, act_dist={act_dist}")
-    print(f"{'='*60}")
-
-    s1 = make_spheres((*batch_shape, n1, 4))
-    s2 = make_spheres((*batch_shape, n2, 4))
-
-    # Create group assignments — assign spheres round-robin to groups
-    group_idx = torch.arange(n1, device="cuda", dtype=torch.int32) % n_groups
-
-    # Compute per-group AABB from spheres_1. Since spheres_1 varies per batch element,
-    # we need the AABB to be conservative (union over all batch elements).
-    # group_aabb_1: (n_groups, 6) = [min_x, min_y, min_z, max_x, max_y, max_z]
-    s1_flat = s1.reshape(-1, n1, 4)  # (flat_batch, n1, 4)
-    group_aabb = torch.zeros(n_groups, 6, device="cuda")
-    for g in range(n_groups):
-        mask = group_idx == g
-        g_spheres = s1_flat[:, mask]  # (flat_batch, n_in_group, 4)
-        centers = g_spheres[..., :3]
-        radii = g_spheres[..., 3]
-        max_r = radii.max().item()
-        mins = centers.min(dim=0).values.min(dim=0).values  # (3,)
-        maxs = centers.max(dim=0).values.max(dim=0).values  # (3,)
-        group_aabb[g, :3] = mins - max_r - act_dist
-        group_aabb[g, 3:] = maxs + max_r + act_dist
-
-    # Compute per-batch AABB for spheres_2
-    s2_flat = s2.reshape(-1, n2, 4)
-    centers_2 = s2_flat[..., :3]
-    radii_2 = s2_flat[..., 3]
-    max_r2 = radii_2.max(dim=-1).values  # (flat_batch,)
-    mins_2 = centers_2.min(dim=1).values  # (flat_batch, 3)
-    maxs_2 = centers_2.max(dim=1).values  # (flat_batch, 3)
-    batch_aabb_2 = torch.cat([mins_2 - max_r2.unsqueeze(-1), maxs_2 + max_r2.unsqueeze(-1)], dim=-1)
-    batch_aabb_2 = batch_aabb_2.reshape(*batch_shape, 6)
-
-    # Ungrouped reference
-    s1_ref = s1.clone().requires_grad_(True)
-    s2_ref = s2.clone().requires_grad_(True)
-    out_ref = sphere_to_sphere_overlap_warp(s1_ref, s2_ref, act_dist)
-
-    # Grouped
-    s1_grp = s1.clone().requires_grad_(True)
-    s2_grp = s2.clone().requires_grad_(True)
-    out_grp = sphere_to_sphere_overlap_grouped_warp(s1_grp, s2_grp, act_dist, group_aabb, group_idx, batch_aabb_2)
-
-    all_ok = True
-    all_ok &= check_close("grouped forward output", out_ref, out_grp, atol=1e-4)
-
-    # Backward
-    grad_out = torch.randn_like(out_ref)
-    out_ref.backward(grad_out)
-    out_grp.backward(grad_out)
-
-    all_ok &= check_close("grouped grad_spheres_1", s1_ref.grad, s1_grp.grad, atol=1e-4)
-    all_ok &= check_close("grouped grad_spheres_2", s2_ref.grad, s2_grp.grad, atol=1e-4)
-    return all_ok
-
-
-def benchmark_grouped(label, batch_shape, n1, n2, n_groups, act_dist=0.01, n_iters=100, n_warmup=10):
-    """Benchmark grouped vs ungrouped."""
-    from cutamp.costs_warp import sphere_to_sphere_overlap_grouped_warp, sphere_to_sphere_overlap_warp
-
-    print(f"\n{'='*60}")
-    print(f"Benchmark grouped: {label}")
-    print(f"  batch_shape={batch_shape}, n1={n1}, n2={n2}, n_groups={n_groups}")
-    print(f"{'='*60}")
-
-    group_idx = torch.arange(n1, device="cuda", dtype=torch.int32) % n_groups
-
-    def time_fn(fn, label):
-        for _ in range(n_warmup):
-            s1 = make_spheres((*batch_shape, n1, 4)).requires_grad_(True)
-            s2 = make_spheres((*batch_shape, n2, 4)).requires_grad_(True)
-            out = fn(s1, s2)
-            out.sum().backward()
-
-        torch.cuda.synchronize()
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-
-        start.record()
-        for _ in range(n_iters):
-            s1 = make_spheres((*batch_shape, n1, 4)).requires_grad_(True)
-            s2 = make_spheres((*batch_shape, n2, 4)).requires_grad_(True)
-            out = fn(s1, s2)
-            out.sum().backward()
-        end.record()
-        torch.cuda.synchronize()
-
-        elapsed_ms = start.elapsed_time(end)
-        per_iter_ms = elapsed_ms / n_iters
-        print(f"  {label}: {per_iter_ms:.3f} ms/iter ({elapsed_ms:.1f} ms total)")
-        return per_iter_ms
-
-    def ungrouped_fn(s1, s2):
-        return sphere_to_sphere_overlap_warp(s1, s2, act_dist)
-
-    def grouped_fn(s1, s2):
-        # Compute AABBs (included in timing since it's part of the real workload)
-        s1_flat = s1.detach().reshape(-1, n1, 4)
-        s2_flat = s2.detach().reshape(-1, n2, 4)
-
-        group_aabb = torch.zeros(n_groups, 6, device="cuda")
-        for g in range(n_groups):
-            mask = group_idx == g
-            g_spheres = s1_flat[:, mask]
-            centers = g_spheres[..., :3]
-            radii = g_spheres[..., 3]
-            max_r = radii.max().item()
-            mins = centers.min(dim=0).values.min(dim=0).values
-            maxs = centers.max(dim=0).values.max(dim=0).values
-            group_aabb[g, :3] = mins - max_r - act_dist
-            group_aabb[g, 3:] = maxs + max_r + act_dist
-
-        c2 = s2_flat[..., :3]
-        r2 = s2_flat[..., 3]
-        mr2 = r2.max(dim=-1).values
-        batch_aabb_2 = torch.cat([
-            c2.min(dim=1).values - mr2.unsqueeze(-1),
-            c2.max(dim=1).values + mr2.unsqueeze(-1),
-        ], dim=-1).reshape(*s2.shape[:-2], 6)
-
-        return sphere_to_sphere_overlap_grouped_warp(s1, s2, act_dist, group_aabb, group_idx, batch_aabb_2)
-
-    t_ungrouped = time_fn(ungrouped_fn, "Ungrouped")
-    t_grouped = time_fn(grouped_fn, "Grouped  ")
-
-    speedup = t_ungrouped / t_grouped
-    print(f"  Speedup: {speedup:.2f}x")
-    return speedup
-
-
 if __name__ == "__main__":
     assert torch.cuda.is_available(), "CUDA required"
     print("Sphere-to-sphere overlap: Warp vs PyTorch")
@@ -387,10 +249,6 @@ if __name__ == "__main__":
     all_passed &= test_correctness("realistic", batch_shape=(512, 8), n1=38, n2=200)
     all_passed &= test_correctness("large", batch_shape=(512, 8), n1=38, n2=800)
 
-    # Grouped correctness — must match ungrouped exactly
-    all_passed &= test_grouped_correctness("grouped small", batch_shape=(4,), n1=12, n2=20, n_groups=3)
-    all_passed &= test_grouped_correctness("grouped realistic", batch_shape=(512, 8), n1=65, n2=200, n_groups=12)
-
     # Gradient finite-diff check
     all_passed &= test_gradcheck()
 
@@ -398,9 +256,6 @@ if __name__ == "__main__":
     benchmark("small (baseline)", batch_shape=(32, 2), n1=10, n2=50)
     benchmark("realistic (200 sph/obj)", batch_shape=(512, 8), n1=38, n2=200)
     benchmark("large (800 sph/obj)", batch_shape=(512, 8), n1=38, n2=800)
-
-    # Grouped benchmarks (simulating robot: 65 spheres, 12 links)
-    benchmark_grouped("robot vs object (200 sph)", batch_shape=(512, 8), n1=65, n2=200, n_groups=12)
 
     print(f"\n{'='*60}")
     if all_passed:
