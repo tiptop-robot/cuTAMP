@@ -62,6 +62,7 @@ def get_fr3_robotiq_ik_solver(
         self_collision_opt=self_collision_opt,
         self_collision_check=self_collision_check,
         use_particle_opt=use_particle_opt,
+        collision_cache={"obb": 50, "mesh": 50},
     )
     ik_solver = IKSolver(ik_config)
     return ik_solver

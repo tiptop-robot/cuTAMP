@@ -33,5 +33,6 @@ goal:
   # "On" needs to be in quotes because it's a YAML keyword
   - "On": [block0, goal]
   - "On": [block1, goal]
-  - "On": [block2, goal]
-  - HandEmpty: []
+#  - "On": [block2, goal]
+  - "Holding": [block2]
+#  - HandEmpty: []
