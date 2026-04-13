@@ -228,7 +228,7 @@ class CostFunction:
         self.pair_to_first_pose_ts = {}
         self._activated_objs = sorted(self.activated_obj)  # deterministic ordering for torch.stack
         self._movable_world_mask = None  # lazily built in collision_costs
-        self._all_pose_ts = None  # cached in _validate_rollout
+        self._all_pose_ts = None
 
     def _validate_rollout(self, rollout: Rollout):
         """Checks structure of the rollout conforms to the assumptions we make in the cost function implementation."""
@@ -438,7 +438,7 @@ class CostFunction:
         return traj_cost
 
     def collision_costs(self, rollout: Rollout, obj_to_spheres: Dict[str, Float[torch.Tensor, "b t n 4"]]) -> dict:
-        """Collision costs. This could be tied better to the constraints and sped up significantly."""
+        """Collision costs."""
         # Robot to world
         robot_spheres = rollout["robot_spheres"]
         with torch.profiler.record_function("coll::robot_to_world"):
