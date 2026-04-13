@@ -10,18 +10,8 @@ Usage:
 
 import torch
 
+from cutamp.costs import sphere_to_sphere_overlap_pytorch
 from cutamp.costs_warp import sphere_to_sphere_overlap_warp
-
-
-def _pytorch_reference(spheres_1, spheres_2, activation_distance):
-    centers_1, radii_1 = spheres_1[..., :3], spheres_1[..., 3]
-    centers_2, radii_2 = spheres_2[..., :3], spheres_2[..., 3]
-    diff = centers_1.unsqueeze(-2) - centers_2.unsqueeze(-3)
-    dist_sq = (diff * diff).sum(dim=-1)
-    dist = torch.sqrt(dist_sq + 1e-8)
-    radii_sum = radii_1.unsqueeze(-1) + radii_2.unsqueeze(-2)
-    penetration = radii_sum - dist + activation_distance
-    return torch.relu(penetration).sum((-2, -1))
 
 
 def _make_spheres(shape, device="cuda", spread=1.0, radius_range=(0.01, 0.05)):
@@ -66,7 +56,7 @@ def benchmark(label, batch_shape, n1, n2, act_dist=0.01, n_iters=100, n_warmup=1
         print(f"  {label}: {per_iter_ms:.3f} ms/iter ({elapsed_ms:.1f} ms total)")
         return per_iter_ms
 
-    t_pytorch = time_fn(_pytorch_reference, "PyTorch")
+    t_pytorch = time_fn(sphere_to_sphere_overlap_pytorch, "PyTorch")
     t_warp = time_fn(sphere_to_sphere_overlap_warp, "Warp   ")
 
     speedup = t_pytorch / t_warp
