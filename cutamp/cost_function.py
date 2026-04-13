@@ -261,9 +261,10 @@ class CostFunction:
                 )
             elif obj_1 in self.obj_to_first_pose_ts:
                 self.pair_to_first_pose_ts[pair] = self.obj_to_first_pose_ts[obj_1]
-            else:
-                assert obj_2 in self.obj_to_first_place
+            elif obj_2 in self.obj_to_first_place:
                 self.pair_to_first_pose_ts[pair] = self.obj_to_first_pose_ts[obj_2]
+            else:
+                _log.warning(f"{pair} is never activated in a 'Place' action")
 
         self._rollout_validated = True
 
@@ -455,9 +456,14 @@ class CostFunction:
                 num_objs, t = coll.shape[0], coll.shape[2]
                 mask = torch.ones(num_objs, 1, t, device=coll.device)
                 for i, obj in enumerate(self._activated_objs):
-                    first_ts = self.obj_to_first_pose_ts[obj]
-                    if first_ts > 0:
-                        mask[i, :, :first_ts] = 0.0
+                    if obj not in self.obj_to_first_pose_ts:
+                        # If an object has no pose ts then it is only ever picked, so we don't need to check collision
+                        # between it and the world. Hence, we set the mask to 0.0
+                        mask[i] = 0.0
+                    else:
+                        first_ts = self.obj_to_first_pose_ts[obj]
+                        if first_ts > 0:
+                            mask[i, :, :first_ts] = 0.0
                 self._movable_world_mask = mask
             coll = coll * self._movable_world_mask
 
@@ -489,6 +495,9 @@ class CostFunction:
             )  # (num_pairs, b, t)
 
             for idx, pair in enumerate(self.movable_obj_pairs):
+                if pair not in self.pair_to_first_pose_ts:
+                    # Neither object was ever 'activated' (i.e., placed), so no need to collision check this object pair
+                    continue
                 pair_cost = collision_results[idx]
                 pose_ts = self.pair_to_first_pose_ts[pair]
                 # Only consider costs from when the action was activated. This allows us to handle objects that
