@@ -68,11 +68,11 @@ Total CUDA time: 10.46s (5.4x slower than tetris)
 
 The `coll::robot_to_movables` call dominates at **33% of GPU time**. The `aten::mul`,
 `aten::sum`, `aten::sub`, `aten::neg`, `SqrtBackward0` entries are the element-wise ops
-inside `_sphere_to_sphere_overlap` and its autograd backward pass.
+inside `_sphere_to_sphere_overlap_pytorch` and its autograd backward pass.
 
-## Root cause: `_sphere_to_sphere_overlap` in `costs.py`
+## Root cause: `_sphere_to_sphere_overlap_pytorch` in `costs.py`
 
-The function computes pairwise distances between two sets of spheres:
+The baseline PyTorch implementation computes pairwise distances between two sets of spheres:
 
 ```python
 diff = centers_1.unsqueeze(-2) - centers_2.unsqueeze(-3)   # (B, T, n1, n2, 3)
@@ -94,10 +94,10 @@ for this cost alone.
 
 ## Other observations
 
-- **`torch.cuda.synchronize()` every step** (`optimize_plan.py:183`): Forces CPU-GPU sync
-  each iteration. CPU time is 15.8s vs 10.5s CUDA time, suggesting ~5s of sync stalls.
-  However, this is used for wall-clock timing in `opt_metrics["elapsed"]` so removing it
-  would affect timing accuracy.
+- **Per-step `torch.cuda.synchronize()` (removed)**: The pre-optimization baseline had a
+  `torch.cuda.synchronize()` call every step in `optimize_plan.py` for wall-clock timing in
+  `opt_metrics["elapsed"]`. This forced CPU-GPU sync each iteration — CPU time was 15.8s vs
+  10.5s CUDA time, suggesting ~5s of sync stalls. This has been removed in the current code.
 
 - **Adam optimizer**: With few spheres it's 24% of GPU time; with many spheres it becomes
   negligible relative to collision costs. Not worth optimizing.

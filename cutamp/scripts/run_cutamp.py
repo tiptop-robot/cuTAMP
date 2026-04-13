@@ -7,6 +7,7 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 import cProfile
+import contextlib
 import logging
 import os
 from typing import Optional
@@ -193,8 +194,14 @@ def entrypoint():
         help="Experiment ID for logging. Results will be saved in <experiment_root>/<experiment_id>",
     )
 
-    # Object collision spheres
+    # Object collision spheres and placement
     parser.add_argument("--coll_n_spheres", type=int, default=50, help="Number of collision spheres per object.")
+    parser.add_argument(
+        "--placement_shrink_dist",
+        type=float,
+        default=0.0,
+        help="Shrink distance for placement validity check (meters).",
+    )
     parser.add_argument(
         "--prop_satisfying_break",
         type=float,
@@ -254,7 +261,7 @@ def entrypoint():
         coll_n_spheres=args.coll_n_spheres,
         # Note: these are new features with this fork of cuTAMP
         placement_check="obb",
-        placement_shrink_dist=0.0,
+        placement_shrink_dist=args.placement_shrink_dist,
         prop_satisfying_break=args.prop_satisfying_break if args.prop_satisfying_break > 0 else None,
     )
     validate_tamp_config(config)
@@ -270,6 +277,7 @@ def entrypoint():
     else:
         cprofile = None
 
+    torch_profiler = None
     if args.torch_profile:
         print(f"Torch profiling enabled. Trace will be saved to {args.torch_profile_output}")
         torch_profiler = torch.profiler.profile(
@@ -278,23 +286,20 @@ def entrypoint():
             profile_memory=True,
             with_stack=True,
         )
-        torch_profiler.__enter__()
-    else:
-        torch_profiler = None
 
-    cutamp_demo(
-        env,
-        config,
-        experiment_id=args.experiment_id,
-        use_tetris_tuned_weights=args.tuned_tetris_weights,
-    )
-
-    if torch_profiler is not None:
-        torch_profiler.__exit__(None, None, None)
-        torch_profiler.export_chrome_trace(args.torch_profile_output)
-        print(f"Torch profile trace saved to {args.torch_profile_output}")
-        # Also print a summary table sorted by CUDA time
-        print("\n" + torch_profiler.key_averages().table(sort_by="cuda_time_total", row_limit=30))
+    try:
+        with torch_profiler if torch_profiler is not None else contextlib.nullcontext():
+            cutamp_demo(
+                env,
+                config,
+                experiment_id=args.experiment_id,
+                use_tetris_tuned_weights=args.tuned_tetris_weights,
+            )
+    finally:
+        if torch_profiler is not None:
+            torch_profiler.export_chrome_trace(args.torch_profile_output)
+            print(f"Torch profile trace saved to {args.torch_profile_output}")
+            print("\n" + torch_profiler.key_averages().table(sort_by="cuda_time_total", row_limit=30))
 
     if cprofile is not None:
         cprofile.disable()

@@ -178,11 +178,10 @@ class SphereOverlapWarp(torch.autograd.Function):
         # Allocate outputs
         partial_cost = torch.zeros(flat_batch, n1, device=device, dtype=torch.float32)
         grad_s1 = torch.zeros(flat_batch * n1, 4, device=device, dtype=torch.float32)
-        grad_s2 = torch.zeros(flat_batch * n2, 4, device=device, dtype=torch.float32)
-
         act_dist = 0.0 if activation_distance is None else float(activation_distance)
+        need_grad = spheres_1.requires_grad or spheres_2.requires_grad
 
-        # Kernel 1: cost + grad_spheres_1
+        # Kernel 1: cost + grad_spheres_1 (grad_s1 is always computed as it shares the loop)
         wp.launch(
             kernel=_sphere_overlap_fwd_kernel_1,
             dim=flat_batch * n1,
@@ -198,30 +197,33 @@ class SphereOverlapWarp(torch.autograd.Function):
             stream=stream,
         )
 
-        # Kernel 2: grad_spheres_2
-        wp.launch(
-            kernel=_sphere_overlap_fwd_kernel_2,
-            dim=flat_batch * n2,
-            inputs=[
-                wp.from_torch(s1_flat, dtype=wp.float32),
-                wp.from_torch(s2_flat, dtype=wp.float32),
-                act_dist,
-                n1,
-                n2,
-                wp.from_torch(grad_s2, dtype=wp.float32),
-            ],
-            stream=stream,
-        )
+        # Kernel 2: grad_spheres_2 (skip when gradients are not needed)
+        if need_grad:
+            grad_s2 = torch.zeros(flat_batch * n2, 4, device=device, dtype=torch.float32)
+            wp.launch(
+                kernel=_sphere_overlap_fwd_kernel_2,
+                dim=flat_batch * n2,
+                inputs=[
+                    wp.from_torch(s1_flat, dtype=wp.float32),
+                    wp.from_torch(s2_flat, dtype=wp.float32),
+                    act_dist,
+                    n1,
+                    n2,
+                    wp.from_torch(grad_s2, dtype=wp.float32),
+                ],
+                stream=stream,
+            )
 
         # Sum partial costs across n1 to get per-batch-element cost
         cost = partial_cost.sum(dim=-1)  # (flat_batch,)
         cost = cost.reshape(batch_shape)
 
-        # Reshape gradients back to input shapes
-        grad_s1 = grad_s1.reshape(*batch_shape, n1, 4)
-        grad_s2 = grad_s2.reshape(*batch_shape, n2, 4)
+        # Reshape and save gradients for backward
+        if need_grad:
+            grad_s1 = grad_s1.reshape(*batch_shape, n1, 4)
+            grad_s2 = grad_s2.reshape(*batch_shape, n2, 4)
+            ctx.save_for_backward(grad_s1, grad_s2)
 
-        ctx.save_for_backward(grad_s1, grad_s2)
         return cost
 
     @staticmethod

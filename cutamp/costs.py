@@ -95,13 +95,13 @@ def _sphere_to_sphere_overlap_pytorch(
 try:
     from cutamp.costs_warp import sphere_to_sphere_overlap_warp
 
-    _USE_WARP = True
     _sphere_to_sphere_overlap = sphere_to_sphere_overlap_warp
     _log.debug("Using Warp-accelerated sphere-to-sphere overlap")
-except ImportError:
-    _USE_WARP = False
-    _sphere_to_sphere_overlap = _sphere_to_sphere_overlap_pytorch
-    _log.warning("Warp not available, falling back to PyTorch sphere-to-sphere overlap")
+except Exception as exc:
+    raise RuntimeError(
+        "Failed to import Warp sphere-to-sphere overlap. Warp should be available via cuRobo. "
+        f"Original error: {exc}"
+    ) from exc
 
 
 def sphere_to_sphere_overlap(
