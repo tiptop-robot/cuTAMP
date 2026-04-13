@@ -1,8 +1,8 @@
 """
 Test script to verify the movable-to-world initial collision fix.
 
-Creates an environment where blocks rest on a surface within the
-world_activation_distance, causing false initial collision costs.
+Creates an environment where blocks slightly penetrate the floor
+(simulating perception noise), causing false initial collision costs.
 With the old code (no masking), movable_to_world collision penalizes
 all particles uniformly at pose_ts=0, making it much harder to find
 a feasible plan. With the fix, initial timesteps are masked per-object.

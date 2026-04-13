@@ -1,7 +1,6 @@
 # Test environment for movable-to-world initial collision edge case.
-# Blocks are positioned so their collision spheres fall within a non-zero
-# world_activation_distance of the floor surface, triggering false initial
-# collision costs that the fix in _movable_to_world_cost should mask out.
+# Blocks slightly penetrate the floor (simulating perception noise), triggering
+# false initial collision costs that the movable-to-world masking should handle.
 
 name: blocks_activation_dist_test
 geometries:
