@@ -442,22 +442,26 @@ class CostFunction:
 
         # Collision between movables and world — batch all activated objects in one collision_fn call,
         # then mask out timesteps before each object's first placement (objects may initially be in
-        # collision with surfaces they rest on, e.g. due to perception noise)
+        # collision with surfaces they rest on, e.g. due to perception noise). The motion solver
+        # handles this analogously by temporarily detaching the object from the robot when the
+        # grasped object's spheres cause an invalid start state during retract planning.
         stacked = torch.stack([obj_to_spheres[obj] for obj in self._activated_objs])
         coll = self.world.collision_fn(rearrange(stacked, "objs b t n d -> (objs b) t n d"))
         coll = rearrange(coll, "(objs b) t -> objs b t", objs=len(self._activated_objs))
 
-        # Mask is fixed per skeleton — cache after first call
-        if self._movable_world_mask is None:
-            num_objs, t = coll.shape[0], coll.shape[2]
-            mask = torch.ones(num_objs, 1, t, device=coll.device)
-            for i, obj in enumerate(self._activated_objs):
-                first_ts = self.obj_to_first_pose_ts[obj]
-                if first_ts > 0:
-                    mask[i, :, :first_ts] = 0.0
-            self._movable_world_mask = mask
+        if self.config.mask_initial_movable_world_collision:
+            # Mask is fixed per skeleton — cache after first call
+            if self._movable_world_mask is None:
+                num_objs, t = coll.shape[0], coll.shape[2]
+                mask = torch.ones(num_objs, 1, t, device=coll.device)
+                for i, obj in enumerate(self._activated_objs):
+                    first_ts = self.obj_to_first_pose_ts[obj]
+                    if first_ts > 0:
+                        mask[i, :, :first_ts] = 0.0
+                self._movable_world_mask = mask
+            coll = coll * self._movable_world_mask
 
-        coll_values["movable_to_world"] = (coll * self._movable_world_mask).sum(dim=0)
+        coll_values["movable_to_world"] = coll.sum(dim=0)
 
         # Collision between robot and movables, need to expand poses to full timesteps
         all_movable_spheres = torch.cat(list(obj_to_spheres.values()), dim=2)
