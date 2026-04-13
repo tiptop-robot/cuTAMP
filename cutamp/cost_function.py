@@ -228,6 +228,7 @@ class CostFunction:
         self.pair_to_first_pose_ts = {}
         self._activated_objs = sorted(self.activated_obj)  # deterministic ordering for torch.stack
         self._movable_world_mask = None  # lazily built in collision_costs
+        self._all_pose_ts = None  # cached in _validate_rollout
 
     def _validate_rollout(self, rollout: Rollout):
         """Checks structure of the rollout conforms to the assumptions we make in the cost function implementation."""
@@ -265,6 +266,7 @@ class CostFunction:
                 assert obj_2 in self.obj_to_first_place
                 self.pair_to_first_pose_ts[pair] = self.obj_to_first_pose_ts[obj_2]
 
+        self._all_pose_ts = list(rollout["ts_to_pose_ts"].values())
         self._rollout_validated = True
 
     def kinematic_costs(self, rollout: Rollout) -> Union[dict, None]:
@@ -462,23 +464,13 @@ class CostFunction:
 
         coll_values["movable_to_world"] = (coll * self._movable_world_mask).sum(dim=0)
 
-        # Collision between robot and movables — per-object loop.
-        # Smaller per-object tensors (200 vs 800 spheres) have better cache behavior,
-        # and the Warp kernel's per-pair early exit handles fine-grained filtering.
         with torch.profiler.record_function("coll::robot_to_movables"):
-            all_pose_ts = list(rollout["ts_to_pose_ts"].values())
             act_dist = self.config.gripper_activation_distance
-            robot_to_movables = torch.zeros(robot_spheres.shape[0], robot_spheres.shape[1], device=robot_spheres.device)
-            for obj_spheres in obj_to_spheres.values():
-                obj_spheres_t = obj_spheres[:, all_pose_ts]  # (b, t, n_obj, 4)
-                robot_to_movables = robot_to_movables + sphere_to_sphere_overlap(
-                    robot_spheres,
-                    obj_spheres_t,
-                    activation_distance=act_dist,
-                )
-            coll_values["robot_to_movables"] = robot_to_movables
+            coll_values["robot_to_movables"] = sum(
+                sphere_to_sphere_overlap(robot_spheres, obj_s[:, self._all_pose_ts], activation_distance=act_dist)
+                for obj_s in obj_to_spheres.values()
+            )
 
-        # TODO: this method could still be SIGNIFICANTLY sped up
         # Collision between movable objects
         if self.movable_obj_pairs:
             with torch.profiler.record_function("coll::movable_to_movable"):

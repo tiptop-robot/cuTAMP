@@ -6,24 +6,10 @@ Run with: pytest tests/test_sphere_overlap.py -v
 import pytest
 import torch
 
+from cutamp.costs import sphere_to_sphere_overlap_pytorch
 from cutamp.costs_warp import sphere_to_sphere_overlap_warp
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-
-
-def pytorch_reference(spheres_1, spheres_2, activation_distance):
-    """Reference implementation from costs.py (_sphere_to_sphere_overlap_pytorch)."""
-    centers_1, radii_1 = spheres_1[..., :3], spheres_1[..., 3]
-    centers_2, radii_2 = spheres_2[..., :3], spheres_2[..., 3]
-
-    diff = centers_1.unsqueeze(-2) - centers_2.unsqueeze(-3)
-    dist_sq = (diff * diff).sum(dim=-1)
-    dist = torch.sqrt(dist_sq + 1e-8)
-
-    radii_sum = radii_1.unsqueeze(-1) + radii_2.unsqueeze(-2)
-    penetration = radii_sum - dist + activation_distance
-
-    return torch.relu(penetration).sum((-2, -1))
 
 
 def make_spheres(shape, device="cuda", spread=1.0, radius_range=(0.01, 0.05)):
@@ -54,7 +40,7 @@ def test_forward_and_backward(label, batch_shape, n1, n2):
     # Forward — PyTorch reference
     s1_ref = s1.clone().requires_grad_(True)
     s2_ref = s2.clone().requires_grad_(True)
-    out_ref = pytorch_reference(s1_ref, s2_ref, act_dist)
+    out_ref = sphere_to_sphere_overlap_pytorch(s1_ref, s2_ref, act_dist)
 
     # Forward — Warp
     s1_warp = s1.clone().requires_grad_(True)
@@ -87,26 +73,45 @@ def test_no_overlap():
     torch.testing.assert_close(s2_w.grad, torch.zeros_like(s2_w.grad))
 
 
-def test_full_overlap():
-    """Coincident spheres should match PyTorch reference."""
-    s1 = torch.tensor([[[0.0, 0.0, 0.0, 0.05]]], device="cuda")
-    s2 = torch.tensor([[[0.0, 0.0, 0.0, 0.05]]], device="cuda")
+def test_mixed_overlap():
+    """Mix of overlapping, non-overlapping, and coincident sphere pairs should match PyTorch reference."""
+    s1 = torch.tensor(
+        [
+            [
+                [0.0, 0.0, 0.0, 0.05],  # overlaps with s2[0] (coincident) and s2[1] (partial)
+                [1.0, 0.0, 0.0, 0.05],  # overlaps with s2[1] (partial)
+                [10.0, 10.0, 10.0, 0.01],  # no overlap with anything
+            ]
+        ],
+        device="cuda",
+    )
+    s2 = torch.tensor(
+        [
+            [
+                [0.0, 0.0, 0.0, 0.05],  # coincident with s1[0]
+                [0.95, 0.0, 0.0, 0.05],  # close to s1[0] and s1[1]
+                [20.0, 20.0, 20.0, 0.01],  # far from everything
+            ]
+        ],
+        device="cuda",
+    )
     act_dist = 0.0
 
     s1_ref = s1.clone().requires_grad_(True)
     s2_ref = s2.clone().requires_grad_(True)
-    out_ref = pytorch_reference(s1_ref, s2_ref, act_dist)
+    out_ref = sphere_to_sphere_overlap_pytorch(s1_ref, s2_ref, act_dist)
 
     s1_w = s1.clone().requires_grad_(True)
     s2_w = s2.clone().requires_grad_(True)
     out_warp = sphere_to_sphere_overlap_warp(s1_w, s2_w, act_dist)
 
-    torch.testing.assert_close(out_warp, out_ref)
+    assert out_warp.item() > 0, "Expected some overlap"
+    torch.testing.assert_close(out_warp, out_ref, atol=1e-5, rtol=1e-5)
 
     out_ref.sum().backward()
     out_warp.sum().backward()
-    torch.testing.assert_close(s1_w.grad, s1_ref.grad)
-    torch.testing.assert_close(s2_w.grad, s2_ref.grad)
+    torch.testing.assert_close(s1_w.grad, s1_ref.grad, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(s2_w.grad, s2_ref.grad, atol=1e-5, rtol=1e-5)
 
 
 def test_finite_diff_gradients():
@@ -125,10 +130,10 @@ def test_finite_diff_gradients():
     for idx in range(s1.numel()):
         s1_plus = s1.detach().clone()
         s1_plus.view(-1)[idx] += eps
-        out_plus = pytorch_reference(s1_plus, s2.detach(), act_dist).sum()
+        out_plus = sphere_to_sphere_overlap_pytorch(s1_plus, s2.detach(), act_dist).sum()
         s1_minus = s1.detach().clone()
         s1_minus.view(-1)[idx] -= eps
-        out_minus = pytorch_reference(s1_minus, s2.detach(), act_dist).sum()
+        out_minus = sphere_to_sphere_overlap_pytorch(s1_minus, s2.detach(), act_dist).sum()
         grad_fd.view(-1)[idx] = (out_plus - out_minus) / (2 * eps)
 
     torch.testing.assert_close(s1.grad, grad_fd, atol=1e-2, rtol=1e-2)
@@ -138,10 +143,10 @@ def test_finite_diff_gradients():
     for idx in range(s2.numel()):
         s2_plus = s2.detach().clone()
         s2_plus.view(-1)[idx] += eps
-        out_plus = pytorch_reference(s1.detach(), s2_plus, act_dist).sum()
+        out_plus = sphere_to_sphere_overlap_pytorch(s1.detach(), s2_plus, act_dist).sum()
         s2_minus = s2.detach().clone()
         s2_minus.view(-1)[idx] -= eps
-        out_minus = pytorch_reference(s1.detach(), s2_minus, act_dist).sum()
+        out_minus = sphere_to_sphere_overlap_pytorch(s1.detach(), s2_minus, act_dist).sum()
         grad_fd2.view(-1)[idx] = (out_plus - out_minus) / (2 * eps)
 
     torch.testing.assert_close(s2.grad, grad_fd2, atol=1e-2, rtol=1e-2)

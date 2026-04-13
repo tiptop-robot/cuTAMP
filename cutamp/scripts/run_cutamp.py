@@ -269,13 +269,11 @@ def entrypoint():
     # Load env and run demo
     env = load_demo_env(args.env)
 
-    # Profile if required
+    # Profiling setup — cProfile and torch profiler can run simultaneously
+    cprofile = None
     if args.profile:
-        print(f"Profiling enabled. Output will be saved to {args.profile_output}")
+        print(f"cProfile enabled. Output will be saved to {args.profile_output}")
         cprofile = cProfile.Profile()
-        cprofile.enable()
-    else:
-        cprofile = None
 
     torch_profiler = None
     if args.torch_profile:
@@ -288,6 +286,8 @@ def entrypoint():
         )
 
     try:
+        if cprofile is not None:
+            cprofile.enable()
         with torch_profiler if torch_profiler is not None else contextlib.nullcontext():
             cutamp_demo(
                 env,
@@ -296,15 +296,14 @@ def entrypoint():
                 use_tetris_tuned_weights=args.tuned_tetris_weights,
             )
     finally:
+        if cprofile is not None:
+            cprofile.disable()
+            cprofile.dump_stats(args.profile_output)
+            print(f"cProfile results saved to {args.profile_output}")
         if torch_profiler is not None:
             torch_profiler.export_chrome_trace(args.torch_profile_output)
             print(f"Torch profile trace saved to {args.torch_profile_output}")
             print("\n" + torch_profiler.key_averages().table(sort_by="cuda_time_total", row_limit=30))
-
-    if cprofile is not None:
-        cprofile.disable()
-        cprofile.dump_stats(args.profile_output)
-        _log.info(f"Profile results saved to {args.profile_output}")
 
 
 if __name__ == "__main__":

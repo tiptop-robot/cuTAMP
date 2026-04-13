@@ -7,6 +7,7 @@ for the motivation.
 
 import torch
 import warp as wp
+from jaxtyping import Float
 
 wp.config.quiet = True
 wp.init()
@@ -154,12 +155,21 @@ def _sphere_overlap_fwd_kernel_2(
     grad_spheres_2[tid, 3] = gr2
 
 
-class SphereOverlapWarp(torch.autograd.Function):
-    """Warp-accelerated sphere-to-sphere overlap with analytical gradients."""
+class _SphereOverlapWarp(torch.autograd.Function):
+    """Warp-accelerated sphere-to-sphere overlap with analytical gradients.
+
+    Inputs must have matching batch dims. The ``need_grad`` check uses ``requires_grad`` on the
+    inputs (not ``torch.is_grad_enabled()``) because PyTorch disables autograd inside
+    ``Function.forward``, so ``is_grad_enabled()`` is always False here.
+    """
 
     @staticmethod
-    def forward(ctx, spheres_1, spheres_2, activation_distance):
-        # spheres_1: (*batch, n1, 4), spheres_2: (*batch, n2, 4)
+    def forward(
+        ctx,
+        spheres_1: Float[torch.Tensor, "*batch n1 4"],
+        spheres_2: Float[torch.Tensor, "*batch n2 4"],
+        activation_distance: float,
+    ) -> Float[torch.Tensor, "*batch"]:
         batch_shape = spheres_1.shape[:-2]
         n1 = spheres_1.shape[-2]
         n2 = spheres_2.shape[-2]
@@ -236,31 +246,10 @@ class SphereOverlapWarp(torch.autograd.Function):
         return grad_spheres_1, grad_spheres_2, None
 
 
-def _sphere_to_sphere_overlap_pytorch(spheres_1, spheres_2, activation_distance):
-    """PyTorch fallback for shapes that need broadcasting."""
-    centers_1, radii_1 = spheres_1[..., :3], spheres_1[..., 3]
-    centers_2, radii_2 = spheres_2[..., :3], spheres_2[..., 3]
-    diff = centers_1.unsqueeze(-2) - centers_2.unsqueeze(-3)
-    dist_sq = (diff * diff).sum(dim=-1)
-    dist = torch.sqrt(dist_sq + 1e-8)
-    radii_sum = radii_1.unsqueeze(-1) + radii_2.unsqueeze(-2)
-    penetration = radii_sum - dist + activation_distance
-    return torch.relu(penetration).sum((-2, -1))
-
-
 def sphere_to_sphere_overlap_warp(
-    spheres_1: torch.Tensor,
-    spheres_2: torch.Tensor,
+    spheres_1: Float[torch.Tensor, "*batch n1 4"],
+    spheres_2: Float[torch.Tensor, "*batch n2 4"],
     activation_distance: float,
-) -> torch.Tensor:
-    """Drop-in replacement for _sphere_to_sphere_overlap using Warp kernels.
-
-    Same signature and semantics: takes two sets of spheres (*batch, n, 4) and returns
-    the total penetration (*batch,).
-
-    Falls back to PyTorch when batch dims don't match (broadcasting needed).
-    """
-    # Warp kernel requires both inputs to have the same batch dims
-    if spheres_1.shape[:-2] != spheres_2.shape[:-2]:
-        return _sphere_to_sphere_overlap_pytorch(spheres_1, spheres_2, activation_distance)
-    return SphereOverlapWarp.apply(spheres_1, spheres_2, activation_distance)
+) -> Float[torch.Tensor, "*batch"]:
+    """Warp-accelerated sphere-to-sphere overlap. Requires matching batch dims."""
+    return _SphereOverlapWarp.apply(spheres_1, spheres_2, activation_distance)

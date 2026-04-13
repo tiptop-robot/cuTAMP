@@ -7,14 +7,13 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 
-import logging
 from typing import Optional
 
 import torch
 from curobo.types.math import Pose
 from jaxtyping import Float
 
-_log = logging.getLogger(__name__)
+from cutamp.costs_warp import sphere_to_sphere_overlap_warp
 
 
 def trajectory_length(
@@ -73,40 +72,30 @@ def get_aabb_from_spheres(spheres: Float[torch.Tensor, "*b n 4"]) -> Float[torch
     return aabb
 
 
-def _sphere_to_sphere_overlap_pytorch(
-    spheres_1: Float[torch.Tensor, "b *h 4"],
-    spheres_2: Float[torch.Tensor, "b *h 4"],
+def sphere_to_sphere_overlap_pytorch(
+    spheres_1: Float[torch.Tensor, "b *h n1 4"],
+    spheres_2: Float[torch.Tensor, "b *h n2 4"],
     activation_distance: float,
 ) -> Float[torch.Tensor, "b *h"]:
     """PyTorch reference implementation. Materializes O(n1*n2) intermediate tensor."""
     centers_1, radii_1 = spheres_1[..., :3], spheres_1[..., 3]
     centers_2, radii_2 = spheres_2[..., :3], spheres_2[..., 3]
 
+    # Pairwise differences: (*batch, n1, 1, 3) - (*batch, 1, n2, 3) -> (*batch, n1, n2, 3)
     diff = centers_1.unsqueeze(-2) - centers_2.unsqueeze(-3)
     dist_sq = (diff * diff).sum(dim=-1)
     dist = torch.sqrt(dist_sq + 1e-8)
 
+    # Penetration: sum of radii + activation distance - distance
     radii_sum = radii_1.unsqueeze(-1) + radii_2.unsqueeze(-2)
     penetration = radii_sum - dist + activation_distance
 
     return torch.relu(penetration).sum((-2, -1))
 
 
-try:
-    from cutamp.costs_warp import sphere_to_sphere_overlap_warp
-
-    _sphere_to_sphere_overlap = sphere_to_sphere_overlap_warp
-    _log.debug("Using Warp-accelerated sphere-to-sphere overlap")
-except Exception as exc:
-    raise RuntimeError(
-        "Failed to import Warp sphere-to-sphere overlap. Warp should be available via cuRobo. "
-        f"Original error: {exc}"
-    ) from exc
-
-
 def sphere_to_sphere_overlap(
-    spheres_1: Float[torch.Tensor, "b *h 4"],
-    spheres_2: Float[torch.Tensor, "b *h 4"],
+    spheres_1: Float[torch.Tensor, "b *h n1 4"],
+    spheres_2: Float[torch.Tensor, "b *h n2 4"],
     activation_distance: float | None = None,
     aabb_1: Float[torch.Tensor, "b *h 2 3"] | None = None,
     aabb_2: Float[torch.Tensor, "b *h 2 3"] | None = None,
@@ -115,11 +104,19 @@ def sphere_to_sphere_overlap(
     """
     Compute the overlap volume between two sets of spheres. Can be used as a collision distance function. If
     use_aabb_check=True, we compute the overlap only for batches of spheres that have intersecting AABBs.
+
+    Uses the Warp kernel when batch dims match, falls back to PyTorch for broadcasting cases.
     """
-    # Convert None to 0.0 for compiled function
     act_dist = 0.0 if activation_distance is None else activation_distance
+
+    # Warp kernel requires matching batch dims; fall back to PyTorch for broadcasting
+    if spheres_1.shape[:-2] == spheres_2.shape[:-2]:
+        _overlap_fn = sphere_to_sphere_overlap_warp
+    else:
+        _overlap_fn = sphere_to_sphere_overlap_pytorch
+
     if not use_aabb_check:
-        return _sphere_to_sphere_overlap(spheres_1, spheres_2, act_dist)
+        return _overlap_fn(spheres_1, spheres_2, act_dist)
 
     # Compute AABB for each batch of spheres
     if aabb_1 is None:
@@ -135,7 +132,7 @@ def sphere_to_sphere_overlap(
     output = torch.zeros_like(intersect, dtype=torch.float32)  # [b, *h]
     if intersect.any():
         # Only compute overlap for intersecting AABBs
-        output[intersect] = _sphere_to_sphere_overlap(spheres_1[intersect], spheres_2[intersect], act_dist)
+        output[intersect] = _overlap_fn(spheres_1[intersect], spheres_2[intersect], act_dist)
     return output
 
 
