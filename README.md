@@ -157,6 +157,15 @@ If you're running cuTAMP on a remote server without a display, you have two opti
     ```
    The visualizer will connect and stream to your local Rerun viewer through the tunnel!
 
+## Testing
+
+Install dev dependencies and run the test suite with pytest. Some tests require a GPU.
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
 ## Examples
 
 The `cutamp-demo` command runs the [`cutamp/scripts/run_cutamp.py`](cutamp/scripts/run_cutamp.py) script with a number
