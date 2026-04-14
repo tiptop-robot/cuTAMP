@@ -12,8 +12,6 @@ Usage:
 import torch
 from curobo.types.math import Pose
 
-from cutamp.costs import curobo_pose_error
-
 
 def _random_pose(batch, device="cuda"):
     """Create a random Pose with position + quaternion."""
@@ -23,6 +21,11 @@ def _random_pose(batch, device="cuda"):
     return Pose(position=position, quaternion=quat)
 
 
+def _pose_error_from_mats(mat_a, mat_b):
+    """Old path: convert both mats back to Pose, then distance."""
+    return Pose.from_matrix(mat_a).distance(Pose.from_matrix(mat_b))
+
+
 def benchmark_old(batch, n_iters=500, n_warmup=50):
     """Old path: Pose -> get_matrix -> store -> from_matrix -> distance."""
     device = "cuda"
@@ -30,9 +33,7 @@ def benchmark_old(batch, n_iters=500, n_warmup=50):
     for _ in range(n_warmup):
         pose_a = _random_pose(batch, device)
         pose_b = _random_pose(batch, device)
-        mat_a = pose_a.get_matrix()
-        mat_b = pose_b.get_matrix()
-        curobo_pose_error(mat_a, mat_b)
+        _pose_error_from_mats(pose_a.get_matrix(), pose_b.get_matrix())
 
     torch.cuda.synchronize()
     start = torch.cuda.Event(enable_timing=True)
@@ -42,11 +43,8 @@ def benchmark_old(batch, n_iters=500, n_warmup=50):
     for _ in range(n_iters):
         pose_a = _random_pose(batch, device)
         pose_b = _random_pose(batch, device)
-        # Simulate rollout: convert Pose to matrix
-        mat_a = pose_a.get_matrix()
-        mat_b = pose_b.get_matrix()
-        # Simulate kinematic_costs: convert matrix back to Pose + distance
-        curobo_pose_error(mat_a, mat_b)
+        # Simulate rollout storing a matrix + kinematic_costs rebuilding Pose on both sides.
+        _pose_error_from_mats(pose_a.get_matrix(), pose_b.get_matrix())
     end.record()
     torch.cuda.synchronize()
 

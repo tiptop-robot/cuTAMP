@@ -10,7 +10,6 @@
 from typing import Optional
 
 import torch
-from curobo.types.math import Pose
 from jaxtyping import Float
 
 from cutamp.costs_warp import sphere_to_sphere_overlap_warp
@@ -138,29 +137,3 @@ def sphere_to_sphere_overlap(
         # Only compute overlap for intersecting AABBs
         output[intersect] = _overlap_fn(spheres_1[intersect], spheres_2[intersect], act_dist)
     return output
-
-
-def curobo_pose_error(
-    pose_a: Pose | Float[torch.Tensor, "b *h 4 4"],
-    pose_b: Pose | Float[torch.Tensor, "b *h 4 4"],
-    batch_shape: torch.Size | tuple[int, ...] | None = None,
-) -> (Float[torch.Tensor, "b *h"], Float[torch.Tensor, "b *h"]):
-    """
-    Compute the translational and rotational errors between two poses using curobo. Thanks Bala.
-
-    Accepts either 4x4 homogeneous matrices or cuRobo `Pose` objects. Passing a `Pose` avoids the
-    matrix -> Pose round-trip and is preferred when the input is already in position+quaternion form
-    (e.g., cuRobo FK output). `Pose` inputs are assumed to be flat; pass `batch_shape` to reshape
-    the outputs. For mat4x4 inputs, the batch shape is inferred.
-    """
-    if isinstance(pose_a, torch.Tensor):
-        batch_shape = pose_a.shape[:-2] if batch_shape is None else batch_shape
-        pose_a = Pose.from_matrix(pose_a.view(-1, 4, 4))
-    if isinstance(pose_b, torch.Tensor):
-        batch_shape = pose_b.shape[:-2] if batch_shape is None else batch_shape
-        pose_b = Pose.from_matrix(pose_b.view(-1, 4, 4))
-
-    p_dist_flat, quat_dist_flat = pose_a.distance(pose_b)
-    if batch_shape is not None:
-        return p_dist_flat.view(batch_shape), quat_dist_flat.view(batch_shape)
-    return p_dist_flat, quat_dist_flat
