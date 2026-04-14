@@ -229,10 +229,11 @@ class _SphereOverlapWarp(torch.autograd.Function):
         cost = partial_cost.sum(dim=-1)  # (flat_batch,)
         cost = cost.reshape(batch_shape)
 
-        # Reshape and save gradients for backward
+        # Reshape and save gradients for backward. Use an empty placeholder for grad_s2 when
+        # spheres_2 doesn't require grad so we don't allocate a full-size zero tensor.
         if need_grad:
             grad_s1 = grad_s1.reshape(*batch_shape, n1, 4)
-            grad_s2 = grad_s2.reshape(*batch_shape, n2, 4) if grad_s2 is not None else torch.zeros(*batch_shape, n2, 4, device=device)
+            grad_s2 = grad_s2.reshape(*batch_shape, n2, 4) if grad_s2 is not None else torch.empty(0, device=device)
             ctx.save_for_backward(grad_s1, grad_s2)
 
         return cost

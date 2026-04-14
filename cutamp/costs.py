@@ -97,16 +97,17 @@ def sphere_to_sphere_overlap_pytorch(
 
 
 def sphere_to_sphere_overlap(
-    spheres_1: Float[torch.Tensor, "b *h n1 4"],
-    spheres_2: Float[torch.Tensor, "b *h n2 4"],
+    spheres_1: Float[torch.Tensor, "*#batch n1 4"],
+    spheres_2: Float[torch.Tensor, "*#batch n2 4"],
     activation_distance: float | None = None,
-    aabb_1: Float[torch.Tensor, "b *h 2 3"] | None = None,
-    aabb_2: Float[torch.Tensor, "b *h 2 3"] | None = None,
+    aabb_1: Float[torch.Tensor, "*batch 2 3"] | None = None,
+    aabb_2: Float[torch.Tensor, "*batch 2 3"] | None = None,
     use_aabb_check: bool = False,
-) -> Float[torch.Tensor, "b *h"]:
+) -> Float[torch.Tensor, "*batch"]:
     """
-    Compute the overlap volume between two sets of spheres. Can be used as a collision distance function. If
-    use_aabb_check=True, we compute the overlap only for batches of spheres that have intersecting AABBs.
+    Compute the overlap volume between two sets of spheres. Can be used as a collision distance function.
+    Broadcasts over batch dims. If use_aabb_check=True, we compute the overlap only for batches of spheres
+    that have intersecting AABBs (requires matching batch dims).
 
     Uses the Warp kernel when batch dims match, falls back to PyTorch for broadcasting cases.
     """
