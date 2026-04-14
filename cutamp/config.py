@@ -76,6 +76,10 @@ class TAMPConfiguration:
     coll_sphere_radius: float = 0.005
     # Distance at which collision checking is activated between the world (in cuRobo)
     world_activation_distance: float = 0.0
+    # Mask out movable-to-world collision costs at timesteps before each object's first placement.
+    # Objects may initially be in collision with surfaces they rest on due to perception noise.
+    # Set to False in simulation or when debugging to surface genuine environment setup issues.
+    mask_initial_movable_world_collision: bool = True
     # Distance at which collision checking is activated between gripper and movables
     gripper_activation_distance: float = 0.0
     # Distance at which collision checking is activated between movables and movables

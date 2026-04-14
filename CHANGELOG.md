@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.3] - 2026-04-13
+
+### Added
+- `max_motion_refine_attempts` config option to cap the number of satisfying particles tried during motion refinement per skeleton (#9)
+- Retry next plan skeleton when motion refinement fails instead of breaking out of the loop (#9)
+- Test environment and pytest for movable-to-world initial collision fix (#10)
+
+### Fixed
+- Movable-to-world collision now masks initial timesteps per object, matching the movable-to-movable approach, so objects with perception noise at their initial pose are not incorrectly penalized (#10)
+- Vectorized movable-to-world collision into a single batched `collision_fn` call with cached mask for better performance (#10)
+- `break_on_satisfying` no longer exits the skeleton loop when motion planning is enabled but all particles fail (#9)
+
 ## [0.0.2] - 2026-04-01
 
 ### Added
