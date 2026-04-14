@@ -471,6 +471,11 @@ class CostFunction:
 
         with torch.profiler.record_function("coll::robot_to_movables"):
             act_dist = self.config.gripper_activation_distance
+            # Per-object Warp kernel launches outperformed a single concatenated call in profiling:
+            # smaller n2 per launch improves the kernel's early-exit behavior (most robot-sphere ↔
+            # distant-object-sphere pairs are rejected on the threshold check before sqrt), and
+            # launch overhead is negligible for the handful of movables we have. Revisit if we
+            # scale to many more movables.
             coll_values["robot_to_movables"] = sum(
                 sphere_to_sphere_overlap(robot_spheres, obj_s[:, self._all_pose_ts], activation_distance=act_dist)
                 for obj_s in obj_to_spheres.values()
