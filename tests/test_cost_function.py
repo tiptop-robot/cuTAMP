@@ -4,6 +4,7 @@ import os
 
 import pytest
 import torch
+from curobo.types.math import Pose
 
 from cutamp.algorithm import run_cutamp
 from cutamp.config import TAMPConfiguration
@@ -33,6 +34,44 @@ def _run_blocks_activation_test(mask: bool) -> int:
     constraint_checker = ConstraintChecker(default_constraint_to_tol.copy())
     _, num_satisfying, _ = run_cutamp(env, config, cost_reducer, constraint_checker)
     return num_satisfying
+
+
+@gpu
+def test_kinematic_costs_pose_parity():
+    """The FK Pose path (build Pose from stored position+quaternion) must match the old
+    matrix round-trip path (Pose.from_matrix(pose.get_matrix())) for pos/rot distance."""
+    torch.manual_seed(0)
+    device = "cuda"
+    b, t = 8, 5
+
+    ee_position = torch.randn(b, t, 3, device=device)
+    raw_quat = torch.randn(b, t, 4, device=device)
+    ee_quaternion = raw_quat / raw_quat.norm(dim=-1, keepdim=True)
+
+    # Build desired poses as proper 4x4 matrices from random position+quaternion
+    desired_pos = torch.randn(b, t, 3, device=device)
+    desired_quat_raw = torch.randn(b, t, 4, device=device)
+    desired_quat = desired_quat_raw / desired_quat_raw.norm(dim=-1, keepdim=True)
+    world_from_ee_desired = (
+        Pose(position=desired_pos.view(-1, 3), quaternion=desired_quat.view(-1, 4)).get_matrix().view(b, t, 4, 4)
+    )
+
+    # New path: Pose built directly from stored position + quaternion
+    new_pose = Pose(
+        position=ee_position.view(-1, 3),
+        quaternion=ee_quaternion.view(-1, 4),
+        normalize_rotation=False,
+    )
+    desired_pose = Pose.from_matrix(world_from_ee_desired.view(-1, 4, 4))
+    new_pos, new_rot = new_pose.distance(desired_pose)
+
+    # Old path: pose -> matrix -> Pose.from_matrix round-trip for the FK side too
+    ee_matrix = new_pose.get_matrix()
+    old_pose = Pose.from_matrix(ee_matrix)
+    old_pos, old_rot = old_pose.distance(desired_pose)
+
+    assert torch.allclose(new_pos, old_pos, atol=1e-5), f"pos_err mismatch: max diff {(new_pos - old_pos).abs().max()}"
+    assert torch.allclose(new_rot, old_rot, atol=1e-5), f"rot_err mismatch: max diff {(new_rot - old_rot).abs().max()}"
 
 
 @gpu
