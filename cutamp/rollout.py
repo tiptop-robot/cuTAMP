@@ -89,15 +89,16 @@ class RolloutFunction:
         num_particles = particles["q0"].shape[0]
 
         # Forward kinematics, we use .view() as it's faster than rearrange
-        confs = torch.stack([particles[conf] for conf in self.conf_params], dim=1)
-        confs_flat = confs.view(-1, confs.shape[-1])
-        robot_state = self.world.kin_model.get_state(confs_flat)
-        world_from_ee_flat = robot_state.ee_pose.get_matrix()
-        world_from_ee = world_from_ee_flat.view(num_particles, confs.shape[1], 4, 4)
+        with torch.profiler.record_function("rollout::forward_kinematics"):
+            confs = torch.stack([particles[conf] for conf in self.conf_params], dim=1)
+            confs_flat = confs.view(-1, confs.shape[-1])
+            robot_state = self.world.kin_model.get_state(confs_flat)
+            world_from_ee_flat = robot_state.ee_pose.get_matrix()
+            world_from_ee = world_from_ee_flat.view(num_particles, confs.shape[1], 4, 4)
 
-        # Robot link spheres for collision checking from cuRobo
-        robot_spheres_flat = robot_state.get_link_spheres()
-        robot_spheres = robot_spheres_flat.view(num_particles, confs.shape[1], -1, 4)
+            # Robot link spheres for collision checking from cuRobo
+            robot_spheres_flat = robot_state.get_link_spheres()
+            robot_spheres = robot_spheres_flat.view(num_particles, confs.shape[1], -1, 4)
 
         # Stores the desired actions
         world_from_tool_desired = []

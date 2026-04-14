@@ -9,7 +9,7 @@
 
 [project]
 name = "cuTAMP"
-version = "0.0.2"
+version = "0.0.3"
 description = "cuTAMP"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,6 +28,7 @@ dependencies = [
     "roma",
     "tqdm",
     "trimesh",
+    "warp-lang",
     "yourdfpy",
 ]
 
