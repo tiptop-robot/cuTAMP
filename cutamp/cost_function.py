@@ -267,6 +267,19 @@ class CostFunction:
                 self.pair_to_first_pose_ts[pair] = self.obj_to_first_pose_ts[obj_2]
 
         self._all_pose_ts = list(rollout["ts_to_pose_ts"].values())
+
+        # Mask for movable-to-world collisions: zero out timesteps before each object's first
+        # placement (objects may initially be in collision with surfaces they rest on, e.g. due
+        # to perception noise). Fixed per skeleton, so build once here.
+        if self.config.mask_initial_movable_world_collision and self._activated_objs:
+            t = len(self._all_pose_ts)
+            mask = torch.ones(len(self._activated_objs), 1, t, device=self.world.device)
+            for i, obj in enumerate(self._activated_objs):
+                first_ts = self.obj_to_first_pose_ts[obj]
+                if first_ts > 0:
+                    mask[i, :, :first_ts] = 0.0
+            self._movable_world_mask = mask
+
         self._rollout_validated = True
 
     def kinematic_costs(self, rollout: Rollout) -> Union[dict, None]:
@@ -445,27 +458,15 @@ class CostFunction:
             coll_values = {"robot_to_world": self.world.collision_fn(robot_spheres)}
 
         # Collision between movables and world — batch all activated objects in one collision_fn call,
-        # then mask out timesteps before each object's first placement (objects may initially be in
-        # collision with surfaces they rest on, e.g. due to perception noise). The motion solver
-        # handles this analogously by temporarily detaching the object from the robot when the
-        # grasped object's spheres cause an invalid start state during retract planning.
+        # then mask out timesteps before each object's first placement. The motion solver handles this
+        # analogously by temporarily detaching the object from the robot when the grasped object's
+        # spheres cause an invalid start state during retract planning.
         with torch.profiler.record_function("coll::movable_to_world"):
             stacked = torch.stack([obj_to_spheres[obj] for obj in self._activated_objs])
             coll = self.world.collision_fn(rearrange(stacked, "objs b t n d -> (objs b) t n d"))
             coll = rearrange(coll, "(objs b) t -> objs b t", objs=len(self._activated_objs))
-
-            if self.config.mask_initial_movable_world_collision:
-                # Mask is fixed per skeleton — cache after first call
-                if self._movable_world_mask is None:
-                    num_objs, t = coll.shape[0], coll.shape[2]
-                    mask = torch.ones(num_objs, 1, t, device=coll.device)
-                    for i, obj in enumerate(self._activated_objs):
-                        first_ts = self.obj_to_first_pose_ts[obj]
-                        if first_ts > 0:
-                            mask[i, :, :first_ts] = 0.0
-                    self._movable_world_mask = mask
+            if self._movable_world_mask is not None:
                 coll = coll * self._movable_world_mask
-
             coll_values["movable_to_world"] = coll.sum(dim=0)
 
         with torch.profiler.record_function("coll::robot_to_movables"):

@@ -81,15 +81,17 @@ def sphere_to_sphere_overlap_pytorch(
     centers_1, radii_1 = spheres_1[..., :3], spheres_1[..., 3]
     centers_2, radii_2 = spheres_2[..., :3], spheres_2[..., 3]
 
-    # Pairwise differences: (*batch, n1, 1, 3) - (*batch, 1, n2, 3) -> (*batch, n1, n2, 3)
+    # Manual distance computation - more efficient than cdist for fusing with torch.compile.
+    # Shape: (*batch, n1, 1, 3) - (*batch, 1, n2, 3) -> (*batch, n1, n2, 3)
     diff = centers_1.unsqueeze(-2) - centers_2.unsqueeze(-3)
     dist_sq = (diff * diff).sum(dim=-1)
-    dist = torch.sqrt(dist_sq + 1e-8)
+    dist = torch.sqrt(dist_sq + 1e-8)  # add epsilon for numerical stability
 
-    # Penetration: sum of radii + activation distance - distance
+    # Compute penetration depth: sum of radii + activation distance - distance
     radii_sum = radii_1.unsqueeze(-1) + radii_2.unsqueeze(-2)
     penetration = radii_sum - dist + activation_distance
 
+    # Return sum of positive penetrations
     return torch.relu(penetration).sum((-2, -1))
 
 
