@@ -23,8 +23,8 @@ def _random_pose(batch, device="cuda"):
     return Pose(position=position, quaternion=quat)
 
 
-def benchmark_current(batch, n_iters=500, n_warmup=50):
-    """Current path: Pose -> get_matrix -> store -> from_matrix -> distance."""
+def benchmark_old(batch, n_iters=500, n_warmup=50):
+    """Old path: Pose -> get_matrix -> store -> from_matrix -> distance."""
     device = "cuda"
 
     for _ in range(n_warmup):
@@ -53,8 +53,8 @@ def benchmark_current(batch, n_iters=500, n_warmup=50):
     return start.elapsed_time(end) / n_iters
 
 
-def benchmark_keep_fk_pose(batch, n_iters=500, n_warmup=50):
-    """Proposed: keep FK Pose, only convert desired side from matrix."""
+def benchmark_new(batch, n_iters=500, n_warmup=50):
+    """New path: keep FK Pose, only convert desired side from matrix."""
     device = "cuda"
 
     for _ in range(n_warmup):
@@ -118,12 +118,12 @@ if __name__ == "__main__":
         print(f"  batch={batch}")
         print(f"{'='*60}")
 
-        t_current = benchmark_current(batch)
-        t_keep_fk = benchmark_keep_fk_pose(batch)
+        t_old = benchmark_old(batch)
+        t_new = benchmark_new(batch)
         t_both = benchmark_both_poses(batch)
 
-        print(f"  Current (matrix round-trip):  {t_current:.3f} ms/iter")
-        print(f"  Keep FK Pose (1 from_matrix): {t_keep_fk:.3f} ms/iter")
+        print(f"  Old (matrix round-trip):      {t_old:.3f} ms/iter")
+        print(f"  New (keep FK Pose):           {t_new:.3f} ms/iter")
         print(f"  Both Poses (no conversion):   {t_both:.3f} ms/iter")
-        print(f"  Speedup (keep FK):  {t_current / t_keep_fk:.2f}x")
-        print(f"  Speedup (both):     {t_current / t_both:.2f}x")
+        print(f"  Speedup (new):      {t_old / t_new:.2f}x")
+        print(f"  Speedup (both):     {t_old / t_both:.2f}x")

@@ -273,19 +273,14 @@ class CostFunction:
 
     def kinematic_costs(self, rollout: Rollout) -> Union[dict, None]:
         """Kinematic constraints - i.e., pose error between actual and desired end-effector poses."""
-        # Build FK Pose directly from stored position + quaternion (avoids matrix -> Pose round-trip).
-        # The desired side still needs from_matrix since it's built from matrix multiplication.
-        ee_pose_flat = Pose(
+        # FK side: build a Pose from stored position+quaternion to skip the matrix round-trip.
+        # Desired side stays as mat4x4 (built from matrix multiplication upstream).
+        ee_pose = Pose(
             position=rollout["ee_position"].view(-1, 3),
             quaternion=rollout["ee_quaternion"].view(-1, 4),
             normalize_rotation=False,
         )
-        desired_flat = rollout["world_from_ee_desired"].view(-1, 4, 4)
-        desired_pose_flat = Pose.from_matrix(desired_flat)
-        p_dist_flat, quat_dist_flat = ee_pose_flat.distance(desired_pose_flat)
-        batch_shape = rollout["ee_position"].shape[:-1]
-        pos_errs = p_dist_flat.view(batch_shape)
-        rot_errs = quat_dist_flat.view(batch_shape)
+        pos_errs, rot_errs = curobo_pose_error(ee_pose, rollout["world_from_ee_desired"])
         kinematic_cost = {
             "type": "constraint",
             "constraints": self.kinematic_constraints,
