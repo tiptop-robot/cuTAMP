@@ -268,18 +268,6 @@ class CostFunction:
 
         self._all_pose_ts = list(rollout["ts_to_pose_ts"].values())
 
-        # Mask for movable-to-world collisions: zero out timesteps before each object's first
-        # placement (objects may initially be in collision with surfaces they rest on, e.g. due
-        # to perception noise). Fixed per skeleton, so build once here.
-        if self.config.mask_initial_movable_world_collision and self._activated_objs:
-            t = len(self._all_pose_ts)
-            mask = torch.ones(len(self._activated_objs), 1, t, device=self.world.device)
-            for i, obj in enumerate(self._activated_objs):
-                first_ts = self.obj_to_first_pose_ts[obj]
-                if first_ts > 0:
-                    mask[i, :, :first_ts] = 0.0
-            self._movable_world_mask = mask
-
         self._rollout_validated = True
 
     def kinematic_costs(self, rollout: Rollout) -> Union[dict, None]:
@@ -465,20 +453,27 @@ class CostFunction:
             stacked = torch.stack([obj_to_spheres[obj] for obj in self._activated_objs])
             coll = self.world.collision_fn(rearrange(stacked, "objs b t n d -> (objs b) t n d"))
             coll = rearrange(coll, "(objs b) t -> objs b t", objs=len(self._activated_objs))
-            if self._movable_world_mask is not None:
+            if self.config.mask_initial_movable_world_collision:
+                if self._movable_world_mask is None:
+                    num_objs, t = coll.shape[0], coll.shape[2]
+                    mask = torch.ones(num_objs, 1, t, device=coll.device)
+                    for i, obj in enumerate(self._activated_objs):
+                        first_ts = self.obj_to_first_pose_ts[obj]
+                        if first_ts > 0:
+                            mask[i, :, :first_ts] = 0.0
+                    self._movable_world_mask = mask
                 coll = coll * self._movable_world_mask
             coll_values["movable_to_world"] = coll.sum(dim=0)
 
         with torch.profiler.record_function("coll::robot_to_movables"):
             act_dist = self.config.gripper_activation_distance
-            # Per-object Warp kernel launches outperformed a single concatenated call in profiling:
-            # smaller n2 per launch improves the kernel's early-exit behavior (most robot-sphere ↔
-            # distant-object-sphere pairs are rejected on the threshold check before sqrt), and
-            # launch overhead is negligible for the handful of movables we have. Revisit if we
-            # scale to many more movables.
-            coll_values["robot_to_movables"] = sum(
-                sphere_to_sphere_overlap(robot_spheres, obj_s[:, self._all_pose_ts], activation_distance=act_dist)
-                for obj_s in obj_to_spheres.values()
+            # Concatenate all movable spheres into one call — single kernel launch is faster than
+            # per-object launches at our sphere counts (50–100). See benchmark_per_object_vs_concat.py.
+            all_obj_spheres = torch.cat(
+                [obj_s[:, self._all_pose_ts] for obj_s in obj_to_spheres.values()], dim=-2
+            )
+            coll_values["robot_to_movables"] = sphere_to_sphere_overlap(
+                robot_spheres, all_obj_spheres, activation_distance=act_dist
             )
 
         # Collision between movable objects
