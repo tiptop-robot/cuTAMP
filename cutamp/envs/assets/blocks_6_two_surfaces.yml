@@ -1,0 +1,55 @@
+# 6 blocks with two placement surfaces for benchmarking collision cost scaling.
+
+name: blocks_6_two_surfaces
+geometries:
+  cuboid:
+    # Movables — 6 blocks spread across the workspace
+    block0:
+      color: [244, 67, 54]
+      dims: [0.05, 0.05, 0.05]
+      pose: [0.55, -0.3, 0.04, -0.97, 0.0, 0.0, 0.23]
+    block1:
+      color: [33, 150, 243]
+      dims: [0.05, 0.05, 0.05]
+      pose: [0.55, 0.32, 0.045, 0.03, 0.0, 0.0, 0.99]
+    block2:
+      color: [251, 140, 0]
+      dims: [0.05, 0.05, 0.05]
+      pose: [0.4, -0.325, 0.04, 0.03, 0.0, 0.0, 0.99]
+    block3:
+      color: [102, 187, 106]
+      dims: [0.05, 0.05, 0.05]
+      pose: [0.36, 0.32, 0.04, -0.43, 0.0, 0.0, 0.90]
+    block4:
+      color: [156, 39, 176]
+      dims: [0.05, 0.05, 0.05]
+      pose: [0.45, -0.15, 0.04, 0.71, 0.0, 0.0, 0.71]
+    block5:
+      color: [255, 235, 59]
+      dims: [0.05, 0.05, 0.05]
+      pose: [0.45, 0.15, 0.04, 0.92, 0.0, 0.0, 0.38]
+
+    # Statics — floor + two placement surfaces
+    floor:
+      color: [235, 196, 145]
+      dims: [1.3, 0.85, 0.04]
+      pose: [0.25, 0.0, -0.02, 1.0, 0.0, 0.0, 0.0]
+    goal_left:
+      color: [186, 255, 201]
+      dims: [0.35, 0.35, 0.01]
+      pose: [0.55, -0.15, 0.005, 1.0, 0.0, 0.0, 0.0]
+    goal_right:
+      color: [201, 186, 255]
+      dims: [0.35, 0.35, 0.01]
+      pose: [0.55, 0.15, 0.005, 1.0, 0.0, 0.0, 0.0]
+
+types:
+  Movable: [block0, block1, block2, block3, block4, block5]
+  Surface: [floor, goal_left, goal_right]
+
+goal:
+  - "On": [block0, goal_left]
+  - "On": [block1, goal_left]
+  - "On": [block2, goal_right]
+  - "On": [block3, goal_right]
+  - HandEmpty: []
