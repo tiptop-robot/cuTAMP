@@ -73,11 +73,12 @@ def get_aabb_from_spheres(spheres: Float[torch.Tensor, "*b n 4"]) -> Float[torch
 
 
 def sphere_to_sphere_overlap_pytorch(
-    spheres_1: Float[torch.Tensor, "b *h n1 4"],
-    spheres_2: Float[torch.Tensor, "b *h n2 4"],
+    spheres_1: Float[torch.Tensor, "*#batch n1 4"],
+    spheres_2: Float[torch.Tensor, "*#batch n2 4"],
     activation_distance: float,
-) -> Float[torch.Tensor, "b *h"]:
-    """PyTorch reference implementation. Materializes O(n1*n2) intermediate tensor."""
+) -> Float[torch.Tensor, "*batch"]:
+    """PyTorch reference implementation. Broadcasts over batch dims and materializes the
+    O(n1*n2) pairwise intermediate tensor."""
     centers_1, radii_1 = spheres_1[..., :3], spheres_1[..., 3]
     centers_2, radii_2 = spheres_2[..., :3], spheres_2[..., 3]
 
