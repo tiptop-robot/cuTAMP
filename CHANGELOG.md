@@ -18,7 +18,14 @@ All changes in this release are from #11 (Warp sphere overlap + FK Pose optimiza
 - Removed per-step `torch.cuda.synchronize()` in the optimization loop that was forcing CPU-GPU pipeline stalls
 
 ### Performance
-- 2.66x end-to-end optimization loop speedup on `blocks_5` / 50 spheres / 100 steps (4.98s → 1.87s, RTX 3090, median of 3 runs)
+
+End-to-end optimization loop wall time, 100 steps, 512 particles, RTX 3090, median of 3 runs. Speedup scales with the size of the movable-sphere pairwise tensor (more objects × more spheres/object → larger win):
+
+| Env | Before (0.0.3) | After (0.0.4) | Speedup |
+|---|---|---|---|
+| `tetris_3` (3 blocks, ~6 sph/obj) | 1.46s | 1.36s | 1.07x |
+| `blocks` (4 blocks, ~50 sph/obj) | 3.43s | 1.68s | 2.04x |
+| `blocks_5` (5 blocks, 50 sph/obj) | 4.98s | 1.87s | 2.66x |
 
 ## [0.0.3] - 2026-04-13
 
