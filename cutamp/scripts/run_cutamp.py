@@ -203,7 +203,7 @@ def entrypoint():
     parser.add_argument(
         "--placement_shrink_dist",
         type=float,
-        default=0.0,
+        default=0.02,
         help="Shrink distance for placement validity check (meters).",
     )
     parser.add_argument(
