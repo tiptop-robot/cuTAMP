@@ -38,7 +38,7 @@ each, reporting the median):
 |---|---|---|---|
 | A — baseline | ✗ | ✗ | **4.98s** |
 | B — warp only | ✓ | ✗ | **2.08s** |
-| D — both | ✓ | ✓ | **1.87s** |
+| C — both | ✓ | ✓ | **1.87s** |
 
 Attribution:
 
@@ -46,7 +46,7 @@ Attribution:
 |---|---|---|
 | Warp sphere overlap (incl. concat launch) | **2.40x** | 4.98s → 2.08s |
 | FK Pose round-trip removal (on top of Warp) | **1.11x** | 2.08s → 1.87s |
-| **Combined (A → D)** | **2.66x** | **4.98s → 1.87s (−62%)** |
+| **Combined (A → C)** | **2.66x** | **4.98s → 1.87s (−62%)** |
 
 The Warp kernel dominates the end-to-end win. The FK Pose change is a smaller but free
 follow-up once the sphere-overlap bottleneck is gone — with the dominant cost removed,
