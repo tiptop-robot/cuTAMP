@@ -29,16 +29,16 @@ appear as named spans in the trace.
 
 ## End-to-end speedup breakdown
 
-To cleanly attribute the wall-clock win to each change, we ran `cutamp-demo` at three
-commits on `blocks_5` (5 objects, 50 spheres/object, 512 particles, 100 opt steps) and
-measured the optimization loop wall time (`perf_counter` around the opt loop, 3 runs each,
-reporting the median):
+To cleanly attribute the wall-clock win to each change, we ran `cutamp-demo` in three
+configurations on `blocks_5` (5 objects, 50 spheres/object, 512 particles, 100 opt steps)
+and measured the optimization loop wall time (`perf_counter` around the opt loop, 3 runs
+each, reporting the median):
 
-| Variant | Commit | Warp kernel | Keep FK Pose | Loop wall time |
-|---|---|---|---|---|
-| A — baseline | origin/main (64a0b7e) | ✗ | ✗ | **4.98s** |
-| B — warp only | 96abcb6 | ✓ | ✗ | **2.08s** |
-| D — HEAD | this PR | ✓ | ✓ | **1.87s** |
+| Variant | Warp kernel | Keep FK Pose | Loop wall time |
+|---|---|---|---|
+| A — baseline | ✗ | ✗ | **4.98s** |
+| B — warp only | ✓ | ✗ | **2.08s** |
+| D — both | ✓ | ✓ | **1.87s** |
 
 Attribution:
 
