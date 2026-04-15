@@ -203,8 +203,10 @@ def entrypoint():
     parser.add_argument(
         "--placement_shrink_dist",
         type=float,
-        default=0.02,
-        help="Shrink distance for placement validity check (meters).",
+        default=0.0,
+        help="Shrink distance for placement validity check (meters). Larger values enforce a bigger "
+        "margin from surface edges (harder to satisfy but more robust). Tight-placement envs like "
+        "blocks_tight require 0.0; tetris_3 yields more satisfying particles at 0.02.",
     )
     parser.add_argument(
         "--prop_satisfying_break",
