@@ -479,8 +479,8 @@ class CostFunction:
 
         with torch.profiler.record_function("coll::robot_to_movables"):
             act_dist = self.config.gripper_activation_distance
-            # Concatenate all movable spheres into one call — single kernel launch is faster than
-            # per-object launches at our sphere counts (50–100). See benchmark_per_object_vs_concat.py.
+            # Concatenate all movable spheres into one kernel launch — faster than per-object
+            # launches at our sphere counts (~50/object) where launch overhead dominates.
             all_obj_spheres = torch.cat(
                 [obj_s[:, self._all_pose_ts] for obj_s in obj_to_spheres.values()], dim=-2
             )
