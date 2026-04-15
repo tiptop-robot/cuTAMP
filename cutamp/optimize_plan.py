@@ -152,6 +152,7 @@ class ParticleOptimizer:
                 cost_dict = cost_fn(rollout)
             with torch.profiler.record_function("cost_reduction"):
                 costs = self.cost_reducer(cost_dict, consider_types=consider_types)
+            with torch.profiler.record_function("satisfying_mask"):
                 satisfying_mask = self.get_satisfying_mask(cost_dict, verbose=False)
             num_satisfying = satisfying_mask.sum().item()
             # If num satisfying bigger than desired proportion, break
@@ -276,8 +277,8 @@ class ParticleOptimizer:
             visualizer.set_joint_positions(q.tolist() + gripper_joints)
 
             ee_pose = CuroboPose(
-                position=rollout["ee_position"][best_idx, ts].unsqueeze(0),
-                quaternion=rollout["ee_quaternion"][best_idx, ts].unsqueeze(0),
+                position=rollout["ee_position"][best_idx, ts][None],
+                quaternion=rollout["ee_quaternion"][best_idx, ts][None],
             )
             visualizer.log_mat4x4("rollout/ee_pose", ee_pose.get_matrix()[0].cpu())
 

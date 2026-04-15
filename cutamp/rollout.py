@@ -10,7 +10,6 @@
 from typing import List, Dict, TypedDict
 
 import torch
-from curobo.types.math import Pose
 from jaxtyping import Float
 
 from cutamp.utils.common import Particles, action_6dof_to_mat4x4, action_4dof_to_mat4x4
@@ -54,13 +53,6 @@ class Rollout(TypedDict):
     action_to_ts: Dict[str, int]
     action_to_pose_ts: Dict[str, int]
     ts_to_pose_ts: Dict[int, int]
-
-
-def get_world_from_ee(rollout: Rollout) -> Float[torch.Tensor, "num_particles t 4 4"]:
-    """Compute world_from_ee matrix from stored position + quaternion. Use for visualization only."""
-    pose = Pose(position=rollout["ee_position"].view(-1, 3), quaternion=rollout["ee_quaternion"].view(-1, 4))
-    mat = pose.get_matrix()
-    return mat.view(*rollout["ee_position"].shape[:-1], 4, 4)
 
 
 class RolloutFunction:
@@ -259,6 +251,7 @@ class RolloutFunction:
             assert (
                 confs.shape[1]
                 == ee_position.shape[1]
+                == ee_quaternion.shape[1]
                 == world_from_ee_desired.shape[1]
                 == world_from_tool_desired.shape[1]
                 == ts

@@ -133,8 +133,8 @@ def _visualize_best_particle(
         visualizer.set_joint_positions(q.tolist() + gripper_joints)
 
         ee_pose = Pose(
-            position=rollout["ee_position"][best_idx, ts].unsqueeze(0),
-            quaternion=rollout["ee_quaternion"][best_idx, ts].unsqueeze(0),
+            position=rollout["ee_position"][best_idx, ts][None],
+            quaternion=rollout["ee_quaternion"][best_idx, ts][None],
         )
         visualizer.log_mat4x4("rollout/ee_pose", ee_pose.get_matrix()[0].cpu())
 

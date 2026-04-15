@@ -114,12 +114,12 @@ def sphere_to_sphere_overlap(
 
     # Warp kernel requires matching batch dims; fall back to PyTorch for broadcasting
     if spheres_1.shape[:-2] == spheres_2.shape[:-2]:
-        _overlap_fn = sphere_to_sphere_overlap_warp
+        overlap_fn = sphere_to_sphere_overlap_warp
     else:
-        _overlap_fn = sphere_to_sphere_overlap_pytorch
+        overlap_fn = sphere_to_sphere_overlap_pytorch
 
     if not use_aabb_check:
-        return _overlap_fn(spheres_1, spheres_2, act_dist)
+        return overlap_fn(spheres_1, spheres_2, act_dist)
 
     # Compute AABB for each batch of spheres
     if aabb_1 is None:
@@ -135,5 +135,5 @@ def sphere_to_sphere_overlap(
     output = torch.zeros_like(intersect, dtype=torch.float32)  # [b, *h]
     if intersect.any():
         # Only compute overlap for intersecting AABBs
-        output[intersect] = _overlap_fn(spheres_1[intersect], spheres_2[intersect], act_dist)
+        output[intersect] = overlap_fn(spheres_1[intersect], spheres_2[intersect], act_dist)
     return output

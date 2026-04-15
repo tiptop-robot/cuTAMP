@@ -478,14 +478,13 @@ class CostFunction:
             coll_values["movable_to_world"] = coll.sum(dim=0)
 
         with torch.profiler.record_function("coll::robot_to_movables"):
-            act_dist = self.config.gripper_activation_distance
             # Concatenate all movable spheres into one kernel launch — faster than per-object
             # launches at our sphere counts (~50/object) where launch overhead dominates.
             all_obj_spheres = torch.cat(
                 [obj_s[:, self._all_pose_ts] for obj_s in obj_to_spheres.values()], dim=-2
             )
             coll_values["robot_to_movables"] = sphere_to_sphere_overlap(
-                robot_spheres, all_obj_spheres, activation_distance=act_dist
+                robot_spheres, all_obj_spheres, activation_distance=self.config.gripper_activation_distance
             )
 
         # Collision between movable objects
