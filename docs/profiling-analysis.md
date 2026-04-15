@@ -27,7 +27,32 @@ The `--torch-profile` flag captures full GPU kernel timing. The `record_function
 in `optimize_plan.py`, `cost_function.py`, and `rollout.py` label the key sections so they
 appear as named spans in the trace.
 
-## Pre-optimization baseline
+## End-to-end speedup breakdown
+
+To cleanly attribute the wall-clock win to each change, we ran `cutamp-demo` at three
+commits on `blocks_5` (5 objects, 50 spheres/object, 512 particles, 100 opt steps) and
+measured the optimization loop wall time (`perf_counter` around the opt loop, 3 runs each,
+reporting the median):
+
+| Variant | Commit | Warp kernel | Keep FK Pose | Loop wall time |
+|---|---|---|---|---|
+| A — baseline | origin/main (64a0b7e) | ✗ | ✗ | **4.98s** |
+| B — warp only | 96abcb6 | ✓ | ✗ | **2.08s** |
+| D — HEAD | this PR | ✓ | ✓ | **1.87s** |
+
+Attribution:
+
+| Change | Isolated speedup | Wall-time delta |
+|---|---|---|
+| Warp sphere overlap (incl. concat launch) | **2.40x** | 4.98s → 2.08s |
+| FK Pose round-trip removal (on top of Warp) | **1.11x** | 2.08s → 1.87s |
+| **Combined (A → D)** | **2.66x** | **4.98s → 1.87s (−62%)** |
+
+The Warp kernel dominates the end-to-end win. The FK Pose change is a smaller but free
+follow-up once the sphere-overlap bottleneck is gone — with the dominant cost removed,
+cuRobo's `Pose.from_matrix` round-trip becomes visible and worth eliminating.
+
+## Pre-optimization baseline — GPU-time breakdown
 
 ### Blocks (200 spheres/object, 4 objects) — 100 opt steps
 
@@ -48,6 +73,9 @@ The `coll::robot_to_movables` call dominated at **33% of GPU time**. The `aten::
 are element-wise ops inside `sphere_to_sphere_overlap_pytorch` and its autograd backward
 pass, materializing an O(B × T × n1 × n2 × 3) intermediate tensor (~1.4 GB per call).
 
+Note the 200-sphere/4-object config here is the original `blocks` env we first profiled;
+the end-to-end table above uses the `blocks_5`/50-sphere config we ship as the default.
+
 ## Optimization 1: Warp kernel for `sphere_to_sphere_overlap`
 
 Replaced the PyTorch pairwise distance implementation with a fused NVIDIA Warp kernel
@@ -65,13 +93,14 @@ Replaced the PyTorch pairwise distance implementation with a fused NVIDIA Warp k
 - **`torch.autograd.Function`** wrapper (`_SphereOverlapWarp`): Forward launches both
   kernels, stores analytical gradients. Backward is just `stored_grad * grad_output`.
 
-**Benchmark results** (RTX 3090, forward + backward, 100 iterations):
+**Micro-benchmark results** (`benchmark_sphere_overlap.py`, RTX 3090, forward + backward,
+100 iterations):
 
 | Workload | PyTorch | Warp | Speedup |
 |---|---|---|---|
-| Small (32×2, 10 vs 50) | 0.13 ms | 0.08 ms | 1.6x |
-| Realistic (512×8, 38 vs 200) | 3.1 ms | 0.42 ms | 7.4x |
-| Large (512×8, 38 vs 800) | 12.8 ms | 0.42 ms | 30.8x |
+| Small (32×2, 10 vs 50) | 0.75 ms | 0.46 ms | 1.6x |
+| Realistic (512×8, 38 vs 200) | 11.9 ms | 0.40 ms | 29.5x |
+| Large (512×8, 38 vs 800) | 44.2 ms | 1.43 ms | 30.9x |
 
 ## Optimization 2: Concatenated `robot_to_movables` call
 
@@ -114,8 +143,9 @@ constructs a `Pose` from these without matrix conversion. The desired side still
 | Keep FK Pose (1 from_matrix) | 0.67 ms | 1.5x |
 | Both Poses (no conversion) | 0.30 ms | 3.4x |
 
-**End-to-end impact**: `cost::kinematic` dropped from 158ms to 123ms (22%).
-Optimization loop wall time improved ~8.5% (2.13s → 1.95s on blocks_5, 100 steps).
+**End-to-end impact**: `cost::kinematic` dropped from 158ms to 123ms (22%). Optimization
+loop wall time improved ~10% on top of the Warp kernel (2.08s → 1.87s median on blocks_5,
+100 steps — see the attribution table above).
 
 ## Current state (post-optimization)
 
