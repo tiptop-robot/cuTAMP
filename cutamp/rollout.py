@@ -43,7 +43,8 @@ class Rollout(TypedDict):
     confs: Float[torch.Tensor, "num_particles *h d"]
     conf_params: List[str]
     robot_spheres: Float[torch.Tensor, "num_particles *h 4"]
-    world_from_ee: Float[torch.Tensor, "num_particles *h 4 4"]
+    ee_position: Float[torch.Tensor, "num_particles t 3"]
+    ee_quaternion: Float[torch.Tensor, "num_particles t 4"]
     world_from_tool_desired: Float[torch.Tensor, "num_particles *h 4 4"]
     world_from_ee_desired: Float[torch.Tensor, "num_particles *h 4 4"]
     gripper_close: List[bool]
@@ -89,15 +90,20 @@ class RolloutFunction:
         num_particles = particles["q0"].shape[0]
 
         # Forward kinematics, we use .view() as it's faster than rearrange
-        confs = torch.stack([particles[conf] for conf in self.conf_params], dim=1)
-        confs_flat = confs.view(-1, confs.shape[-1])
-        robot_state = self.world.kin_model.get_state(confs_flat)
-        world_from_ee_flat = robot_state.ee_pose.get_matrix()
-        world_from_ee = world_from_ee_flat.view(num_particles, confs.shape[1], 4, 4)
+        with torch.profiler.record_function("rollout::forward_kinematics"):
+            confs = torch.stack([particles[conf] for conf in self.conf_params], dim=1)
+            confs_flat = confs.view(-1, confs.shape[-1])
+            robot_state = self.world.kin_model.get_state(confs_flat)
 
-        # Robot link spheres for collision checking from cuRobo
-        robot_spheres_flat = robot_state.get_link_spheres()
-        robot_spheres = robot_spheres_flat.view(num_particles, confs.shape[1], -1, 4)
+            # Store ee pose as position + quaternion directly from cuRobo to avoid
+            # the Pose -> matrix -> Pose round-trip in kinematic_costs.
+            ee_pose = robot_state.ee_pose
+            ee_position = ee_pose.position.view(num_particles, confs.shape[1], 3)
+            ee_quaternion = ee_pose.quaternion.view(num_particles, confs.shape[1], 4)
+
+            # Robot link spheres for collision checking from cuRobo
+            robot_spheres_flat = robot_state.get_link_spheres()
+            robot_spheres = robot_spheres_flat.view(num_particles, confs.shape[1], -1, 4)
 
         # Stores the desired actions
         world_from_tool_desired = []
@@ -244,7 +250,8 @@ class RolloutFunction:
         if self._is_first_rollout:
             assert (
                 confs.shape[1]
-                == world_from_ee.shape[1]
+                == ee_position.shape[1]
+                == ee_quaternion.shape[1]
                 == world_from_ee_desired.shape[1]
                 == world_from_tool_desired.shape[1]
                 == ts
@@ -258,7 +265,8 @@ class RolloutFunction:
             confs=confs,
             conf_params=self.conf_params,
             robot_spheres=robot_spheres,
-            world_from_ee=world_from_ee,
+            ee_position=ee_position,
+            ee_quaternion=ee_quaternion,
             world_from_tool_desired=world_from_tool_desired,
             world_from_ee_desired=world_from_ee_desired,
             gripper_close=gripper_close,

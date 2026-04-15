@@ -18,6 +18,7 @@ from unittest.mock import Mock
 import torch
 
 from curobo.types.base import TensorDeviceType
+from curobo.types.math import Pose
 from curobo.wrap.reacher.ik_solver import IKSolver
 from curobo.wrap.reacher.motion_gen import MotionGen
 from cutamp.config import TAMPConfiguration, validate_tamp_config
@@ -131,8 +132,11 @@ def _visualize_best_particle(
             gripper_joints = []
         visualizer.set_joint_positions(q.tolist() + gripper_joints)
 
-        world_from_ee = rollout["world_from_ee"][best_idx, ts].cpu()
-        visualizer.log_mat4x4("rollout/ee_pose", world_from_ee)
+        ee_pose = Pose(
+            position=rollout["ee_position"][best_idx, ts][None],
+            quaternion=rollout["ee_quaternion"][best_idx, ts][None],
+        )
+        visualizer.log_mat4x4("rollout/ee_pose", ee_pose.get_matrix()[0].cpu())
 
         robot_spheres = rollout["robot_spheres"][best_idx, ts].cpu()
         visualizer.log_spheres("rollout/robot_spheres", robot_spheres)

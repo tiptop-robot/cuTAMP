@@ -7,9 +7,12 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 import cProfile
+import contextlib
 import logging
 import os
 from typing import Optional
+
+import torch
 
 from cutamp.algorithm import run_cutamp
 from cutamp.config import TAMPConfiguration, validate_tamp_config
@@ -44,8 +47,14 @@ def load_demo_env(name: str) -> TAMPEnvironment:
     elif name == "blocks_rotate":
         env_path = os.path.join(get_env_dir(), "obstacle_blocks_rotated_region.yml")
         env = load_env(env_path)
+    elif name == "blocks_tight":
+        env_path = os.path.join(get_env_dir(), "obstacle_blocks_tight_region.yml")
+        env = load_env(env_path)
     elif name == "unpack":
         env_path = os.path.join(get_env_dir(), "unpack_3.yml")
+        env = load_env(env_path)
+    elif name == "blocks_5":
+        env_path = os.path.join(get_env_dir(), "blocks_5.yml")
         env = load_env(env_path)
     else:
         raise ValueError(f"Unknown environment name: {name}")
@@ -92,7 +101,9 @@ def entrypoint():
             "stick_button",
             "blocks",
             "blocks_rotate",
+            "blocks_tight",
             "unpack",
+            "blocks_5",
         ],
     )
     parser.add_argument(
@@ -110,7 +121,12 @@ def entrypoint():
     )
 
     # Robot and grasp
-    parser.add_argument("--robot", default="fr3_robotiq", choices=["panda", "panda_robotiq", "fr3_robotiq", "ur5", "fr3_franka"], help="Robot to use")
+    parser.add_argument(
+        "--robot",
+        default="fr3_robotiq",
+        choices=["panda", "panda_robotiq", "fr3_robotiq", "ur5", "fr3_franka"],
+        help="Robot to use",
+    )
     parser.add_argument(
         "--grasp_dof",
         type=int,
@@ -182,6 +198,23 @@ def entrypoint():
         help="Experiment ID for logging. Results will be saved in <experiment_root>/<experiment_id>",
     )
 
+    # Object collision spheres and placement
+    parser.add_argument("--coll_n_spheres", type=int, default=50, help="Number of collision spheres per object.")
+    parser.add_argument(
+        "--placement_shrink_dist",
+        type=float,
+        default=0.0,
+        help="Shrink distance for placement validity check (meters). Larger values enforce a bigger "
+        "margin from surface edges (harder to satisfy but more robust). Tight-placement envs like "
+        "blocks_tight require 0.0; tetris_3 yields more satisfying particles at 0.02.",
+    )
+    parser.add_argument(
+        "--prop_satisfying_break",
+        type=float,
+        default=0.1,
+        help="Break optimization when this proportion of particles satisfy constraints. Set to 0 to disable.",
+    )
+
     # Tetris tuned weights
     parser.add_argument(
         "--tuned_tetris_weights", action="store_true", help="Use weights tuned on tetris_5 for constraint multipliers."
@@ -198,6 +231,17 @@ def entrypoint():
         type=str,
         default="cutamp_profile.prof",
         help="Output file for profiling data.",
+    )
+    parser.add_argument(
+        "--torch-profile",
+        action="store_true",
+        help="Enable GPU profiling with torch.profiler. Outputs a Chrome trace JSON viewable in chrome://tracing.",
+    )
+    parser.add_argument(
+        "--torch-profile-output",
+        type=str,
+        default="cutamp_torch_trace.json",
+        help="Output file for torch profiler Chrome trace.",
     )
 
     # We only expose a subset of the full TAMPConfiguration. Check config.py for the full configuration.
@@ -220,35 +264,52 @@ def entrypoint():
         opt_viz_interval=args.viz_interval,
         viz_robot_mesh=not args.disable_robot_mesh,
         experiment_root=args.experiment_root,
+        coll_n_spheres=args.coll_n_spheres,
         # Note: these are new features with this fork of cuTAMP
         placement_check="obb",
-        placement_shrink_dist=0.02,
-        prop_satisfying_break=0.1,
+        placement_shrink_dist=args.placement_shrink_dist,
+        prop_satisfying_break=args.prop_satisfying_break if args.prop_satisfying_break > 0 else None,
     )
     validate_tamp_config(config)
 
     # Load env and run demo
     env = load_demo_env(args.env)
 
-    # Profile if required
+    # Profiling setup — cProfile and torch profiler can run simultaneously
+    cprofile = None
     if args.profile:
-        print(f"Profiling enabled. Output will be saved to {args.profile_output}")
-        profiler = cProfile.Profile()
-        profiler.enable()
-    else:
-        profiler = None
+        print(f"cProfile enabled. Output will be saved to {args.profile_output}")
+        cprofile = cProfile.Profile()
 
-    cutamp_demo(
-        env,
-        config,
-        experiment_id=args.experiment_id,
-        use_tetris_tuned_weights=args.tuned_tetris_weights,
-    )
+    torch_profiler = None
+    if args.torch_profile:
+        print(f"Torch profiling enabled. Trace will be saved to {args.torch_profile_output}")
+        torch_profiler = torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=True,
+        )
 
-    if profiler is not None:
-        profiler.disable()
-        profiler.dump_stats(args.profile_output)
-        _log.info(f"Profile results saved to {args.profile_output}")
+    try:
+        if cprofile is not None:
+            cprofile.enable()
+        with torch_profiler if torch_profiler is not None else contextlib.nullcontext():
+            cutamp_demo(
+                env,
+                config,
+                experiment_id=args.experiment_id,
+                use_tetris_tuned_weights=args.tuned_tetris_weights,
+            )
+    finally:
+        if cprofile is not None:
+            cprofile.disable()
+            cprofile.dump_stats(args.profile_output)
+            print(f"cProfile results saved to {args.profile_output}")
+        if torch_profiler is not None:
+            torch_profiler.export_chrome_trace(args.torch_profile_output)
+            print(f"Torch profile trace saved to {args.torch_profile_output}")
+            print("\n" + torch_profiler.key_averages().table(sort_by="cuda_time_total", row_limit=30))
 
 
 if __name__ == "__main__":

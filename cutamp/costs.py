@@ -10,8 +10,9 @@
 from typing import Optional
 
 import torch
-from curobo.types.math import Pose
 from jaxtyping import Float
+
+from cutamp.costs_warp import sphere_to_sphere_overlap_warp
 
 
 def trajectory_length(
@@ -70,22 +71,23 @@ def get_aabb_from_spheres(spheres: Float[torch.Tensor, "*b n 4"]) -> Float[torch
     return aabb
 
 
-def _sphere_to_sphere_overlap(
-    spheres_1: Float[torch.Tensor, "b *h 4"],
-    spheres_2: Float[torch.Tensor, "b *h 4"],
+def sphere_to_sphere_overlap_pytorch(
+    spheres_1: Float[torch.Tensor, "*#batch n1 4"],
+    spheres_2: Float[torch.Tensor, "*#batch n2 4"],
     activation_distance: float,
-) -> Float[torch.Tensor, "b *h"]:
-    """Compute the overlap volume between two sets of spheres. Can be used as a collision distance function."""
+) -> Float[torch.Tensor, "*batch"]:
+    """PyTorch reference implementation. Broadcasts over batch dims and materializes the
+    O(n1*n2) pairwise intermediate tensor."""
     centers_1, radii_1 = spheres_1[..., :3], spheres_1[..., 3]
     centers_2, radii_2 = spheres_2[..., :3], spheres_2[..., 3]
 
-    # Manual distance computation - more efficient than cdist for fusing with torch.compile
-    # Shape: [..., n1, 1, 3] - [..., 1, n2, 3] -> [..., n1, n2, 3]
+    # Manual distance computation - more efficient than cdist for fusing with torch.compile.
+    # Shape: (*batch, n1, 1, 3) - (*batch, 1, n2, 3) -> (*batch, n1, n2, 3)
     diff = centers_1.unsqueeze(-2) - centers_2.unsqueeze(-3)
     dist_sq = (diff * diff).sum(dim=-1)
     dist = torch.sqrt(dist_sq + 1e-8)  # add epsilon for numerical stability
 
-    # Compute penetration depth
+    # Compute penetration depth: sum of radii + activation distance - distance
     radii_sum = radii_1.unsqueeze(-1) + radii_2.unsqueeze(-2)
     penetration = radii_sum - dist + activation_distance
 
@@ -94,21 +96,30 @@ def _sphere_to_sphere_overlap(
 
 
 def sphere_to_sphere_overlap(
-    spheres_1: Float[torch.Tensor, "b *h 4"],
-    spheres_2: Float[torch.Tensor, "b *h 4"],
+    spheres_1: Float[torch.Tensor, "*#batch n1 4"],
+    spheres_2: Float[torch.Tensor, "*#batch n2 4"],
     activation_distance: float | None = None,
-    aabb_1: Float[torch.Tensor, "b *h 2 3"] | None = None,
-    aabb_2: Float[torch.Tensor, "b *h 2 3"] | None = None,
+    aabb_1: Float[torch.Tensor, "*batch 2 3"] | None = None,
+    aabb_2: Float[torch.Tensor, "*batch 2 3"] | None = None,
     use_aabb_check: bool = False,
-) -> Float[torch.Tensor, "b *h"]:
+) -> Float[torch.Tensor, "*batch"]:
     """
-    Compute the overlap volume between two sets of spheres. Can be used as a collision distance function. If
-    use_aabb_check=True, we compute the overlap only for batches of spheres that have intersecting AABBs.
+    Compute the overlap volume between two sets of spheres. Can be used as a collision distance function.
+    Broadcasts over batch dims. If use_aabb_check=True, we compute the overlap only for batches of spheres
+    that have intersecting AABBs (requires matching batch dims).
+
+    Uses the Warp kernel when batch dims match, falls back to PyTorch for broadcasting cases.
     """
-    # Convert None to 0.0 for compiled function
     act_dist = 0.0 if activation_distance is None else activation_distance
+
+    # Warp kernel requires matching batch dims; fall back to PyTorch for broadcasting
+    if spheres_1.shape[:-2] == spheres_2.shape[:-2]:
+        overlap_fn = sphere_to_sphere_overlap_warp
+    else:
+        overlap_fn = sphere_to_sphere_overlap_pytorch
+
     if not use_aabb_check:
-        return _sphere_to_sphere_overlap(spheres_1, spheres_2, act_dist)
+        return overlap_fn(spheres_1, spheres_2, act_dist)
 
     # Compute AABB for each batch of spheres
     if aabb_1 is None:
@@ -124,27 +135,5 @@ def sphere_to_sphere_overlap(
     output = torch.zeros_like(intersect, dtype=torch.float32)  # [b, *h]
     if intersect.any():
         # Only compute overlap for intersecting AABBs
-        output[intersect] = _sphere_to_sphere_overlap(spheres_1[intersect], spheres_2[intersect], act_dist)
+        output[intersect] = overlap_fn(spheres_1[intersect], spheres_2[intersect], act_dist)
     return output
-
-
-def curobo_pose_error(
-    pose_a_mat4x4: Float[torch.Tensor, "b *h 4 4"], pose_b_mat4x4: Float[torch.Tensor, "b *h 4 4"]
-) -> (Float[torch.Tensor, "b *h"], Float[torch.Tensor, "b *h"]):
-    """
-    Compute the translational and rotational errors between two poses using curobo. Thanks Bala.
-    """
-    # Flatten
-    pose_a_flat = pose_a_mat4x4.view(-1, 4, 4)
-    pose_b_flat = pose_b_mat4x4.view(-1, 4, 4)
-
-    # Create curobo pose
-    pose_a = Pose.from_matrix(pose_a_flat)
-    pose_b = Pose.from_matrix(pose_b_flat)
-
-    # Compute distance and unflatten
-    p_dist_flat, quat_dist_flat = pose_a.distance(pose_b)
-    p_dist = p_dist_flat.view(pose_a_mat4x4.shape[:-2])
-    quat_dist = quat_dist_flat.view(pose_b_mat4x4.shape[:-2])
-    assert p_dist.shape == quat_dist.shape
-    return p_dist, quat_dist
