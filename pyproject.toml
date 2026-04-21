@@ -44,6 +44,8 @@ exclude = ["cutamp/robots/assets"]
 
 [project.scripts]
 cutamp-demo = "cutamp.scripts.run_cutamp:entrypoint"
+cutamp-test-robot = "cutamp.scripts.test_robot:entrypoint"
+cutamp-viz-spheres = "cutamp.scripts.viz_spheres:entrypoint"
 
 [tool.setuptools.packages]
 find = { include = ["cutamp", "cutamp.*"] }

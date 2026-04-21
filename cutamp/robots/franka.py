@@ -23,6 +23,7 @@ from curobo.geom.types import WorldConfig
 from curobo.types.robot import RobotConfig
 from curobo.util_file import get_robot_configs_path, join_path, load_yaml, get_assets_path
 from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
+from cutamp.robots.registry import RobotDefinition, register_robot
 from cutamp.robots.utils import RerunRobot
 
 _log = logging.getLogger(__name__)
@@ -167,6 +168,35 @@ def load_fr3_franka_rerun(load_mesh: bool = True) -> RerunRobot:
         q_neutral=(*fr3_franka_neutral_joint_positions, 0.04, 0.04),
         load_mesh=load_mesh,
     )
+
+
+## ---------------------------------------------------------------------------
+## Robot registrations
+## ---------------------------------------------------------------------------
+
+register_robot(
+    RobotDefinition(
+        name="panda",
+        curobo_cfg_fn=franka_curobo_cfg,
+        gripper_spheres_fn=get_franka_gripper_spheres,
+        rerun_fn=load_franka_rerun,
+        q_home=franka_neutral_joint_positions[:7],
+        tool_from_ee_quat=(0.0, 1.0, 0.0, 0.0),
+        tool_from_ee_translation=(0.0, 0.0, 0.105),
+    )
+)
+
+register_robot(
+    RobotDefinition(
+        name="fr3_franka",
+        curobo_cfg_fn=fr3_franka_curobo_cfg,
+        gripper_spheres_fn=get_fr3_franka_gripper_spheres,
+        rerun_fn=load_fr3_franka_rerun,
+        q_home=fr3_franka_neutral_joint_positions,
+        tool_from_ee_quat=(0.0, 1.0, 0.0, 0.0),
+        tool_from_ee_translation=(0.0, 0.0, 0.105),
+    )
+)
 
 
 if __name__ == "__main__":

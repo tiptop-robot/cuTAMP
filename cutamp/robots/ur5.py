@@ -7,6 +7,7 @@
 # without an express license agreement from NVIDIA CORPORATION or
 # its affiliates is strictly prohibited.
 
+import math
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -22,6 +23,7 @@ from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
 from jaxtyping import Float
 from yourdfpy import URDF
 
+from cutamp.robots.registry import RobotDefinition, register_robot
 from cutamp.robots.utils import RerunRobot, get_robotiq_2f_85_gripper_spheres
 
 # or simplified: (0.0, -1.57, 1.57, -1.57, -1.57, 0)
@@ -98,6 +100,24 @@ def load_ur5_rerun(load_mesh: bool = True) -> RerunRobot:
 
     urdf = URDF.load(urdf_path, filename_handler=_locate_curobo_asset)
     return RerunRobot("ur5", urdf, q_neutral=ur5_home, load_mesh=load_mesh)
+
+
+## ---------------------------------------------------------------------------
+## Robot registration
+## ---------------------------------------------------------------------------
+
+register_robot(
+    RobotDefinition(
+        name="ur5",
+        curobo_cfg_fn=ur5_curobo_cfg,
+        gripper_spheres_fn=get_ur5_gripper_spheres,
+        rerun_fn=load_ur5_rerun,
+        q_home=ur5_home[:6],
+        n_arm_joints=6,
+        tool_from_ee_rpy=(math.pi, 0, math.pi / 2),
+        tool_from_ee_translation=(0.0, 0.0, 0.01),
+    )
+)
 
 
 if __name__ == "__main__":

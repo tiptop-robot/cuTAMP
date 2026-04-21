@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from curobo.types.base import TensorDeviceType
 from curobo.types.robot import RobotConfig
 from curobo.util_file import join_path, load_yaml, get_assets_path
 from curobo.wrap.reacher.ik_solver import IKSolver, IKSolverConfig
+from cutamp.robots.registry import RobotDefinition, register_robot
 from cutamp.robots.utils import RerunRobot, get_robotiq_2f_85_gripper_spheres
 
 _log = logging.getLogger(__name__)
@@ -166,6 +168,35 @@ def load_panda_robotiq_rerun(load_mesh: bool = True) -> RerunRobot:
 
     urdf = URDF.load(urdf_path, filename_handler=_locate_asset)
     return RerunRobot("panda", urdf, q_neutral=(*panda_robotiq_neutral_joint_positions, 0.04), load_mesh=load_mesh)
+
+
+## ---------------------------------------------------------------------------
+## Robot registrations
+## ---------------------------------------------------------------------------
+
+register_robot(
+    RobotDefinition(
+        name="fr3_robotiq",
+        curobo_cfg_fn=fr3_robotiq_curobo_cfg,
+        gripper_spheres_fn=get_fr3_robotiq_gripper_spheres,
+        rerun_fn=load_fr3_robotiq_rerun,
+        q_home=fr3_robotiq_neutral_joint_positions,
+        tool_from_ee_rpy=(math.pi, 0, math.pi / 2),
+        tool_from_ee_translation=(0.0, 0.0, 0.015),
+    )
+)
+
+register_robot(
+    RobotDefinition(
+        name="panda_robotiq",
+        curobo_cfg_fn=panda_robotiq_curobo_cfg,
+        gripper_spheres_fn=get_panda_robotiq_gripper_spheres,
+        rerun_fn=load_panda_robotiq_rerun,
+        q_home=panda_robotiq_neutral_joint_positions,
+        tool_from_ee_rpy=(math.pi, 0, math.pi / 2),
+        tool_from_ee_translation=(0.0, 0.0, 0.015),
+    )
+)
 
 
 if __name__ == "__main__":

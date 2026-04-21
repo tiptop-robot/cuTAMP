@@ -23,9 +23,7 @@ from curobo.wrap.reacher.motion_gen import MotionGen, MotionGenConfig
 from cutamp.costs import sphere_to_sphere_overlap
 from cutamp.envs import TAMPEnvironment
 from cutamp.robots import RobotContainer, load_robot_container
-from cutamp.robots.franka_robotiq import get_fr3_robotiq_ik_solver, fr3_robotiq_curobo_cfg
-from cutamp.robots.franka import franka_curobo_cfg, get_franka_ik_solver, get_fr3_franka_ik_solver, fr3_franka_curobo_cfg
-from cutamp.robots.ur5 import ur5_curobo_cfg, get_ur5_ik_solver
+from cutamp.robots.registry import get_curobo_cfg, get_ik_solver as registry_get_ik_solver
 from cutamp.tamp_domain import get_initial_state
 from cutamp.task_planning import State
 from cutamp.utils.collision import get_world_collision_cost
@@ -78,18 +76,8 @@ class TAMPWorld:
         if ik_solver is not None:
             self.ik_solver = ik_solver
             self.ik_solver.update_world(self.world_cfg)
-        elif self.robot_name == "panda":
-            self.ik_solver = get_franka_ik_solver(self.world_cfg)
-        elif self.robot_name == "panda_robotiq":
-            self.ik_solver = get_franka_ik_solver(self.world_cfg)
-        elif self.robot_name == "fr3_robotiq":
-            self.ik_solver = get_fr3_robotiq_ik_solver(self.world_cfg)
-        elif self.robot_name == "fr3_franka":
-            self.ik_solver = get_fr3_franka_ik_solver(self.world_cfg)
-        elif self.robot_name == "ur5":
-            self.ik_solver = get_ur5_ik_solver(self.world_cfg)
         else:
-            raise ValueError(f"Unsupported robot: {self.robot_name}")
+            self.ik_solver = registry_get_ik_solver(self.robot_name, self.world_cfg)
 
         # Sample collision spheres for all movables
         self._obj_to_spheres: Dict[str, Float[torch.Tensor, "n 4"]] = {}
@@ -201,18 +189,7 @@ class TAMPWorld:
         """
         Get the cuRobo motion generator for the robot. If you're debugging, you should set `use_cuda_graph=False`
         """
-        if self.robot_name == "panda":
-            robot_cfg = franka_curobo_cfg()
-        elif self.robot_name == "panda_robotiq":
-            robot_cfg = franka_curobo_cfg()
-        elif self.robot_name == "fr3_robotiq":
-            robot_cfg = fr3_robotiq_curobo_cfg()
-        elif self.robot_name == "fr3_franka":
-            robot_cfg = fr3_franka_curobo_cfg()
-        elif self.robot_name == "ur5":
-            robot_cfg = ur5_curobo_cfg()
-        else:
-            raise ValueError(f"Unsupported robot: {self.robot_name}")
+        robot_cfg = get_curobo_cfg(self.robot_name)
 
         max_num_spheres = max([len(sphs) for sphs in self._obj_to_spheres.values()])
         robot_cfg["robot_cfg"]["kinematics"]["extra_collision_spheres"]["attached_object"] = max_num_spheres

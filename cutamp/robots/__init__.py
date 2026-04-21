@@ -8,40 +8,14 @@
 # its affiliates is strictly prohibited.
 
 from dataclasses import dataclass
-from typing import Sequence
 
-import roma
 import torch
 from jaxtyping import Float
 
 from curobo.cuda_robot_model.cuda_robot_model import CudaRobotModel
-from curobo.geom.transform import quaternion_to_matrix
 from curobo.types.base import TensorDeviceType
-from .franka import (
-    franka_curobo_cfg,
-    get_franka_kinematics_model,
-    get_franka_gripper_spheres,
-    franka_neutral_joint_positions,
-    load_franka_rerun,
-    fr3_franka_neutral_joint_positions,
-    get_fr3_franka_kinematics_model,
-    get_fr3_franka_gripper_spheres,
-    load_fr3_franka_rerun,
-)
-from .franka_robotiq import (
-    load_fr3_robotiq_rerun,
-    fr3_robotiq_neutral_joint_positions,
-    get_fr3_robotiq_kinematics_model,
-    get_fr3_robotiq_gripper_spheres,
-    load_panda_robotiq_rerun,
-    panda_robotiq_neutral_joint_positions,
-    panda_robotiq_curobo_cfg,
-    get_panda_robotiq_kinematics_model,
-    get_panda_robotiq_gripper_spheres,
-    get_panda_robotiq_ik_solver,
-)
-from .ur5 import load_ur5_rerun, ur5_home, get_ur5_gripper_spheres, get_ur5_ik_solver, get_ur5_kinematics_model
-from .utils import RerunRobot
+
+from .utils import RerunRobot as RerunRobot  # noqa: F401
 
 
 @dataclass(frozen=True)
@@ -55,129 +29,86 @@ class RobotContainer:
     tool_from_ee: Float[torch.Tensor, "4 4"]
 
 
-def load_panda_container(tensor_args: TensorDeviceType) -> RobotContainer:
-    kin_model = get_franka_kinematics_model()
-    joint_limits = kin_model.kinematics_config.joint_limits.position
-    assert joint_limits.shape == (2, 7), f"Invalid joint limits shape: {joint_limits.shape}"
+# Import robot modules to trigger their register_robot() calls.
+# This must happen after RobotContainer is defined (registry imports it).
+from . import franka as _franka  # noqa: E402, F401
+from . import franka_robotiq as _franka_robotiq  # noqa: E402, F401
+from . import ur5 as _ur5  # noqa: E402, F401
 
-    gripper_spheres = get_franka_gripper_spheres(tensor_args)
-    tool_from_ee = torch.eye(4, device=tensor_args.device)
-    gripper_down_quat = tensor_args.to_device([0.0, 1.0, 0.0, 0.0])
-    tool_from_ee[:3, :3] = quaternion_to_matrix(gripper_down_quat[None])[0]
-    tool_from_ee[:3, 3] = tensor_args.to_device([0.0, 0.0, 0.105])
-    return RobotContainer("panda", kin_model, joint_limits, gripper_spheres, tool_from_ee)
+# Re-export registry functions as the primary public API
+from .registry import (  # noqa: E402, F401
+    RobotDefinition as RobotDefinition,
+    get_curobo_cfg as get_curobo_cfg,
+    get_ik_solver as get_ik_solver,
+    get_kinematics_model as get_kinematics_model,
+    get_q_home as get_q_home,
+    get_robot_definition as get_robot_definition,
+    list_robots as list_robots,
+    load_rerun_robot as load_rerun_robot,
+    load_robot_container as load_robot_container,
+    register_robot as register_robot,
+)
+
+# ---------------------------------------------------------------------------
+# Backward-compatible re-exports from robot modules
+# (consumed by tiptop and other callers that import from cutamp.robots directly)
+# ---------------------------------------------------------------------------
+from .franka import (  # noqa: E402, F401
+    fr3_franka_curobo_cfg as fr3_franka_curobo_cfg,
+    fr3_franka_neutral_joint_positions as fr3_franka_neutral_joint_positions,
+    franka_curobo_cfg as franka_curobo_cfg,
+    franka_neutral_joint_positions as franka_neutral_joint_positions,
+    get_fr3_franka_gripper_spheres as get_fr3_franka_gripper_spheres,
+    get_fr3_franka_ik_solver as get_fr3_franka_ik_solver,
+    get_fr3_franka_kinematics_model as get_fr3_franka_kinematics_model,
+    get_franka_gripper_spheres as get_franka_gripper_spheres,
+    get_franka_ik_solver as get_franka_ik_solver,
+    get_franka_kinematics_model as get_franka_kinematics_model,
+    load_fr3_franka_rerun as load_fr3_franka_rerun,
+    load_franka_rerun as load_franka_rerun,
+)
+from .franka_robotiq import (  # noqa: E402, F401
+    fr3_robotiq_curobo_cfg as fr3_robotiq_curobo_cfg,
+    fr3_robotiq_neutral_joint_positions as fr3_robotiq_neutral_joint_positions,
+    get_fr3_robotiq_gripper_spheres as get_fr3_robotiq_gripper_spheres,
+    get_fr3_robotiq_ik_solver as get_fr3_robotiq_ik_solver,
+    get_fr3_robotiq_kinematics_model as get_fr3_robotiq_kinematics_model,
+    get_panda_robotiq_gripper_spheres as get_panda_robotiq_gripper_spheres,
+    get_panda_robotiq_ik_solver as get_panda_robotiq_ik_solver,
+    get_panda_robotiq_kinematics_model as get_panda_robotiq_kinematics_model,
+    load_fr3_robotiq_rerun as load_fr3_robotiq_rerun,
+    load_panda_robotiq_rerun as load_panda_robotiq_rerun,
+    panda_robotiq_curobo_cfg as panda_robotiq_curobo_cfg,
+    panda_robotiq_neutral_joint_positions as panda_robotiq_neutral_joint_positions,
+)
+from .ur5 import (  # noqa: E402, F401
+    get_ur5_gripper_spheres as get_ur5_gripper_spheres,
+    get_ur5_ik_solver as get_ur5_ik_solver,
+    get_ur5_kinematics_model as get_ur5_kinematics_model,
+    load_ur5_rerun as load_ur5_rerun,
+    ur5_curobo_cfg as ur5_curobo_cfg,
+    ur5_home as ur5_home,
+)
+
+# Backward-compatible per-robot container loaders.
+# New code should use load_robot_container("robot_name", tensor_args) instead.
+
+
+def load_panda_container(tensor_args: TensorDeviceType) -> RobotContainer:
+    return load_robot_container("panda", tensor_args)
 
 
 def load_fr3_franka_container(tensor_args: TensorDeviceType) -> RobotContainer:
-    kin_model = get_fr3_franka_kinematics_model()
-    joint_limits = kin_model.kinematics_config.joint_limits.position
-    assert joint_limits.shape == (2, 7), f"Invalid joint limits shape: {joint_limits.shape}"
-
-    gripper_spheres = get_fr3_franka_gripper_spheres(tensor_args)
-    tool_from_ee = torch.eye(4, device=tensor_args.device)
-    gripper_down_quat = tensor_args.to_device([0.0, 1.0, 0.0, 0.0])
-    tool_from_ee[:3, :3] = quaternion_to_matrix(gripper_down_quat[None])[0]
-    tool_from_ee[:3, 3] = tensor_args.to_device([0.0, 0.0, 0.105])
-    return RobotContainer("fr3_franka", kin_model, joint_limits, gripper_spheres, tool_from_ee)
+    return load_robot_container("fr3_franka", tensor_args)
 
 
 def load_panda_robotiq_container(tensor_args: TensorDeviceType) -> RobotContainer:
-    kin_model = get_panda_robotiq_kinematics_model()
-    joint_limits = kin_model.kinematics_config.joint_limits.position
-    assert joint_limits.shape == (2, 7), f"Invalid joint limits shape: {joint_limits.shape}"
-
-    gripper_spheres = get_panda_robotiq_gripper_spheres(tensor_args)
-    tool_from_ee = torch.eye(4, device=tensor_args.device)
-    rpy = tensor_args.to_device([torch.pi, 0, torch.pi / 2])
-    tool_from_ee[:3, :3] = roma.euler_to_rotmat("XYZ", rpy)
-    tool_from_ee[:3, 3] = tensor_args.to_device([0.0, 0.0, 0.015])
-    return RobotContainer("panda_robotiq", kin_model, joint_limits, gripper_spheres, tool_from_ee)
+    return load_robot_container("panda_robotiq", tensor_args)
 
 
 def load_fr3_robotiq_container(tensor_args: TensorDeviceType) -> RobotContainer:
-    kin_model = get_fr3_robotiq_kinematics_model()
-    joint_limits = kin_model.kinematics_config.joint_limits.position
-    assert joint_limits.shape == (2, 7), f"Invalid joint limits shape: {joint_limits.shape}"
-
-    gripper_spheres = get_fr3_robotiq_gripper_spheres(tensor_args)
-    tool_from_ee = torch.eye(4, device=tensor_args.device)
-    # Should match UR5 which also uses Robotiq
-    rpy = tensor_args.to_device([torch.pi, 0, torch.pi / 2])
-    tool_from_ee[:3, :3] = roma.euler_to_rotmat("XYZ", rpy)
-    # The Robotiq gripper goes down when closing, so we move the tool frame up by 1.5cm
-    # Note: this is based on our Robotiq coupling, it may need minor tuning based on your setup.
-    tool_from_ee[:3, 3] = tensor_args.to_device([0.0, 0.0, 0.015])
-    return RobotContainer("fr3_robotiq", kin_model, joint_limits, gripper_spheres, tool_from_ee)
+    return load_robot_container("fr3_robotiq", tensor_args)
 
 
 def load_ur5_container(tensor_args: TensorDeviceType) -> RobotContainer:
-    kin_model = get_ur5_kinematics_model()
-    joint_limits = kin_model.kinematics_config.joint_limits.position
-    assert joint_limits.shape == (2, 6), f"Invalid joint limits shape: {joint_limits.shape}"
-
-    gripper_spheres = get_ur5_gripper_spheres(tensor_args)
-    # See screenshot in assets/ur5_home.png to see gripper frame
-    tool_from_ee = torch.eye(4, device=tensor_args.device)
-    rpy = tensor_args.to_device([torch.pi, 0, torch.pi / 2])
-    tool_from_ee[:3, :3] = roma.euler_to_rotmat("XYZ", rpy)
-    # The Robotiq gripper goes down when closing, so we move the tool frame up by 1cm
-    tool_from_ee[:3, 3] = tensor_args.to_device([0.0, 0.0, 0.01])
-    return RobotContainer("ur5", kin_model, joint_limits, gripper_spheres, tool_from_ee)
-
-
-robot_to_fns = {
-    "panda": {
-        "rerun": load_franka_rerun,
-        "q_home": franka_neutral_joint_positions[:7],  # exclude gripper joint
-        "container": load_panda_container,
-    },
-    "fr3_franka": {
-        "rerun": load_fr3_franka_rerun,
-        "q_home": fr3_franka_neutral_joint_positions,
-        "container": load_fr3_franka_container,
-    },
-    "panda_robotiq": {
-        "rerun": load_panda_robotiq_rerun,
-        "q_home": panda_robotiq_neutral_joint_positions,
-        "container": load_panda_robotiq_container,
-    },
-    "fr3_robotiq": {
-        "rerun": load_fr3_robotiq_rerun,
-        "q_home": fr3_robotiq_neutral_joint_positions,  # include gripper joint
-        "container": load_fr3_robotiq_container,
-    },
-    "ur5": {
-        "rerun": load_ur5_rerun,
-        "q_home": ur5_home[:6],
-        "container": load_ur5_container,
-    },
-}
-
-
-def load_rerun_robot(robot: str, load_mesh: bool = True) -> RerunRobot:
-    if robot not in robot_to_fns:
-        raise ValueError(f"Unknown robot: {robot}. Supported robots: {list(robot_to_fns.keys())}")
-    rerun_fn = robot_to_fns[robot]["rerun"]
-    rerun_robot = rerun_fn(load_mesh)
-    if not isinstance(rerun_robot, RerunRobot):
-        raise TypeError(f"Expected RerunRobot, got {type(rerun_robot)}")
-    return rerun_robot
-
-
-def get_q_home(robot: str) -> Sequence[float]:
-    """Get the home joint positions for the specified robot."""
-    if robot not in robot_to_fns:
-        raise ValueError(f"Unknown robot: {robot}. Supported robots: {list(robot_to_fns.keys())}")
-    q_home = robot_to_fns[robot]["q_home"]
-    return q_home
-
-
-def load_robot_container(robot: str, tensor_args: TensorDeviceType) -> RobotContainer:
-    """Load robot container which contains many helper classes and variables."""
-    if robot not in robot_to_fns:
-        raise ValueError(f"Unknown robot: {robot}. Supported robots: {list(robot_to_fns.keys())}")
-    container_fn = robot_to_fns[robot]["container"]
-    container = container_fn(tensor_args)
-    if not isinstance(container, RobotContainer):
-        raise TypeError(f"Expected RobotContainer, got {type(container)}")
-    return container
+    return load_robot_container("ur5", tensor_args)
