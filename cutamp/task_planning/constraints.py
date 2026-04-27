@@ -52,6 +52,11 @@ class StablePlacement(Constraint):
         super().__init__(obj, grasp, placement, surface)
 
 
+class NearPlacement(Constraint):
+    def __init__(self, obj, placement, reference):
+        super().__init__(obj, placement, reference)
+
+
 class ValidPush(Constraint):
     def __init__(self, button, push_pose):
         super().__init__(button, push_pose)

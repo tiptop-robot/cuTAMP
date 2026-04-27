@@ -23,7 +23,7 @@ from cutamp.samplers import (
     place_4dof_sampler,
     sample_yaw,
 )
-from cutamp.tamp_domain import MoveFree, MoveHolding, Pick, Place, Push, PushStick
+from cutamp.tamp_domain import MoveFree, MoveHolding, Pick, Place, PlaceNear, Push, PushStick
 from cutamp.tamp_world import TAMPWorld
 from cutamp.task_planning import PlanSkeleton
 from cutamp.utils.common import (
@@ -219,9 +219,13 @@ class ParticleInitializer:
                         "confidences": particles[f"{grasp}_confidences"],
                     }
 
-            # Place
-            elif op_name == Place.name:
-                obj, grasp, placement, surface, q = params
+            # Place / PlaceNear (placement sampling is identical; PlaceNear's lateral pull
+            # toward the reference is handled in the cost function, not at init time)
+            elif op_name == Place.name or op_name == PlaceNear.name:
+                if op_name == Place.name:
+                    obj, grasp, placement, surface, q = params
+                else:
+                    obj, grasp, placement, surface, _reference, q = params
                 if not world.has_object(obj):
                     raise ValueError(f"{obj=} not found in world")
                 if grasp not in particles:

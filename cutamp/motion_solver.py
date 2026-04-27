@@ -22,7 +22,7 @@ from curobo.types.state import JointState
 from curobo.wrap.reacher.motion_gen import MotionGenPlanConfig, MotionGen
 from cutamp.config import TAMPConfiguration
 from cutamp.optimize_plan import PlanContainer
-from cutamp.tamp_domain import MoveHolding, Push, PushStick, MoveFree, Place, Pick
+from cutamp.tamp_domain import MoveHolding, Push, PushStick, MoveFree, Place, PlaceNear, Pick
 from cutamp.tamp_world import TAMPWorld
 from cutamp.utils.common import Particles, action_6dof_to_mat4x4, action_4dof_to_mat4x4
 from cutamp.utils.timer import TorchTimer
@@ -250,9 +250,12 @@ def solve_curobo(
             all_pos = torch.cat([all_pos, interp], dim=1)
             ts = visualizer.log_joint_trajectory(all_pos, timeline=timeline, start_time=ts, dt=dt)
 
-        # Place
-        elif op_name == Place.name:
-            obj, grasp, placement, surface, q = ground_op.values
+        # Place / PlaceNear (motion plan is identical; reference is cost-only)
+        elif op_name == Place.name or op_name == PlaceNear.name:
+            if op_name == Place.name:
+                obj, grasp, placement, surface, q = ground_op.values
+            else:
+                obj, grasp, placement, surface, _reference, q = ground_op.values
             assert last_js is not None
 
             with timer.time(f"{timeline}_planning"):
