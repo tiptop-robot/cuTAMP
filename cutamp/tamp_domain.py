@@ -21,6 +21,7 @@ from cutamp.task_planning.constraints import (
     CollisionFreePlacement,
     KinematicConstraint,
     Motion,
+    NearPlacement,
     StablePlacement,
     ValidPush,
     ValidPushStick,
@@ -53,6 +54,7 @@ IsSurface = Fluent("IsSurface", [Parameter("surface", Surface)])
 IsStick = Fluent("IsStick", [Parameter("obj", Movable)])
 HasNotPickedUp = Fluent("HasNotPickedUp", [Parameter("obj", Movable)])
 On = Fluent("On", [Parameter("obj", Movable), Parameter("surface", Surface)])
+Near = Fluent("Near", [Parameter("obj", Movable), Parameter("reference", Movable)])
 
 all_tamp_fluents = [
     At,
@@ -70,6 +72,7 @@ all_tamp_fluents = [
     IsStick,
     HasNotPickedUp,
     On,
+    Near,
 ]
 
 
@@ -82,6 +85,7 @@ traj = Parameter("traj", Traj)
 obj = Parameter("obj", Movable)
 button = Parameter("button", Button)
 surface = Parameter("surface", Surface)
+reference = Parameter("reference", Movable)
 
 grasp = Parameter("grasp", Grasp)
 pose = Parameter("pose", Pose)
@@ -161,6 +165,33 @@ Place = TAMPOperator(
 )
 
 
+PlaceNear = TAMPOperator(
+    "PlaceNear",
+    [obj, grasp, placement, surface, reference, q],
+    preconditions=[
+        At(q),
+        Holding(obj),
+        HoldingWithGrasp(obj, grasp),
+        IsSurface(surface),
+        IsMovable(reference),
+        JustMoved(),
+    ],
+    add_effects=[HandEmpty(), CanMove(), On(obj, surface), Near(obj, reference)],
+    del_effects=[
+        Holding(obj),
+        HoldingWithGrasp(obj, grasp),
+        JustMoved(),
+    ],
+    constraints=[
+        KinematicConstraint(q, placement),
+        StablePlacement(obj, grasp, placement, surface),
+        CollisionFreePlacement(obj, placement, surface),
+        NearPlacement(obj, placement, reference),
+    ],
+    costs=[],
+)
+
+
 Push = TAMPOperator(
     "Push",
     [button, pose, q],
@@ -197,7 +228,7 @@ PushStick = TAMPOperator(
     costs=[],
 )
 
-all_tamp_operators = [MoveFree, MoveHolding, Pick, Place, Push, PushStick]
+all_tamp_operators = [MoveFree, MoveHolding, Pick, Place, PlaceNear, Push, PushStick]
 
 
 def get_initial_state(

@@ -10,7 +10,14 @@
 import logging
 import sys
 
-from cutamp.task_planning.constraints import KinematicConstraint, StablePlacement, Collision, Motion, ValidPush
+from cutamp.task_planning.constraints import (
+    Collision,
+    KinematicConstraint,
+    Motion,
+    NearPlacement,
+    StablePlacement,
+    ValidPush,
+)
 from cutamp.task_planning.costs import TrajectoryLength
 
 
@@ -19,6 +26,7 @@ _log = logging.getLogger(__name__)
 default_constraint_to_mult = {
     KinematicConstraint.type: {"pos_err": 1.0, "rot_err": 5.0},
     StablePlacement.type: {"goal_support": 2.0},
+    NearPlacement.type: {"default": 1.0},
     TrajectoryLength.type: {"traj_length": 1e-3},
     "soft": {
         "dist_from_origin": 5e-1,
@@ -81,6 +89,7 @@ default_constraint_to_tol = {
         "stove_support": 1e-2,
     },
     ValidPush.type: {"dist_from_button": 0.0},
+    NearPlacement.type: {"default": 1e-2},
 }
 
 

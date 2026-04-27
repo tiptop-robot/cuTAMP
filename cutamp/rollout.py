@@ -14,7 +14,7 @@ from jaxtyping import Float
 
 from cutamp.utils.common import Particles, action_6dof_to_mat4x4, action_4dof_to_mat4x4
 from cutamp.config import TAMPConfiguration
-from cutamp.tamp_domain import MoveFree, MoveHolding, Pick, Place, Push, PushStick, Conf
+from cutamp.tamp_domain import MoveFree, MoveHolding, Pick, Place, PlaceNear, Push, PushStick, Conf
 from cutamp.tamp_world import (
     TAMPWorld,
 )
@@ -159,9 +159,12 @@ class RolloutFunction:
                 action_to_ts[grasp_name] = ts
                 action_to_pose_ts[grasp_name] = pose_ts
 
-            # Place
-            elif op_name == Place.name:
-                obj_name, grasp_name, place_name, _, _ = ground_op.values
+            # Place / PlaceNear (rollout only needs obj/grasp/placement; reference is cost-only)
+            elif op_name == Place.name or op_name == PlaceNear.name:
+                if op_name == Place.name:
+                    obj_name, grasp_name, place_name, _, _ = ground_op.values
+                else:
+                    obj_name, grasp_name, place_name, _, _, _ = ground_op.values
 
                 # Place is desired object pose in world frame
                 place_4dof = particles[place_name]
