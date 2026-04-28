@@ -138,17 +138,23 @@ def get_valid_ground_operators(
 
         # This is hacky and could break things due to naming, but ok for now
         def _sample_param_type(param_type: str) -> str:
-            if param_type in param_type_to_literals:
-                if param_type not in _FABRICABLE_TYPE_PREFIXES:
-                    raise NotImplementedError
-                # Existing literals follow the convention `<prefix><N>` (e.g. q0, q1, pose3).
-                # Strip the prefix to recover N for each existing literal, then mint a fresh
-                # symbol one past the current max — e.g. {q0, q1, q2} -> "q3".
-                prefix = _FABRICABLE_TYPE_PREFIXES[param_type]
-                existing_nums = {int(lit[len(prefix):]) for lit in param_type_to_literals[param_type]}
-                return f"{prefix}{max(existing_nums) + 1}"
-            else:
-                return f"{param_type}1"
+            # Only fabricable types can be minted by the planner. Non-fabricable types
+            # (movable, surface, ...) must come from the initial state — the goal-state
+            # validator at the top of breadth_first_search relies on this invariant.
+            if param_type not in _FABRICABLE_TYPE_PREFIXES:
+                raise NotImplementedError(
+                    f"Cannot fabricate fresh symbols for non-fabricable type '{param_type}'; "
+                    f"literals of this type must come from the initial state."
+                )
+            prefix = _FABRICABLE_TYPE_PREFIXES[param_type]
+            if param_type not in param_type_to_literals:
+                # First time we see this type — mint the seed symbol (e.g. "q1").
+                return f"{prefix}1"
+            # Existing literals follow the convention `<prefix><N>` (e.g. q0, q1, pose3).
+            # Strip the prefix to recover N for each existing literal, then mint a fresh
+            # symbol one past the current max — e.g. {q0, q1, q2} -> "q3".
+            existing_nums = {int(lit[len(prefix):]) for lit in param_type_to_literals[param_type]}
+            return f"{prefix}{max(existing_nums) + 1}"
 
         def sample_param_type(param_type: str) -> str:
             new_sample = _sample_param_type(param_type)
