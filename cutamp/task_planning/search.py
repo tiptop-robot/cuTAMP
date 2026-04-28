@@ -255,6 +255,27 @@ def breadth_first_search(
         if not isinstance(elem, Atom):
             raise ValueError(f"Goal state must contain only atoms, got {elem.__class__.__name__} {elem}")
 
+    # Reject goal atoms whose literals can never appear in any reachable state.
+    # Operator sampling fabricates fresh symbols only for the internal types below;
+    # any other type (movable, surface, ...) must already be in the initial state,
+    # otherwise BFS expands fresh conf/pose/traj/grasp samples forever without ever satisfying the goal.
+    fabricable_types = {"conf", "pose", "traj", "grasp"}
+    initial_literals_by_type: dict[str, set[str]] = defaultdict(set)
+    for atom in initial_state:
+        for param, value in zip(atom.fluent.parameters, atom.values):
+            initial_literals_by_type[param.type].add(value)
+    for atom in goal_state:
+        for param, value in zip(atom.fluent.parameters, atom.values):
+            if param.type in fabricable_types:
+                continue
+            if value not in initial_literals_by_type.get(param.type, set()):
+                known = sorted(initial_literals_by_type.get(param.type, set()))
+                raise ValueError(
+                    f"Goal atom {atom} references unknown {param.type} literal "
+                    f"'{value}' that does not appear in the initial state. "
+                    f"Known {param.type} literals: {known}"
+                )
+
     # Pre-compute precondition fluent sets for each operator (optimization)
     operator_precond_fluents = [frozenset(pre.name for pre in op.preconditions) for op in operators]
 
