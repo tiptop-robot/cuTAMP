@@ -17,6 +17,21 @@ from cutamp.task_planning import Atom, GroundOperator, Operator, State
 
 _log = logging.getLogger(__name__)
 
+# Param types whose literals are fabricated by the planner during operator grounding
+# (see `_sample_param_type` in `get_valid_ground_operators`). The mapping value is the
+# prefix used when minting fresh symbols (e.g. q0, q1, ... for `conf`). Goal atoms of
+# these types do not need to be present in the initial state; goal atoms of any other
+# type must be, otherwise BFS would expand the frontier forever without ever satisfying
+# the goal. Both the sampler and the goal-state validator read from this single source
+# so they cannot drift out of sync.
+_FABRICABLE_TYPE_PREFIXES: dict[str, str] = {
+    "conf": "q",
+    "pose": "pose",
+    "traj": "traj",
+    "grasp": "grasp",
+}
+FABRICABLE_TYPES: frozenset[str] = frozenset(_FABRICABLE_TYPE_PREFIXES)
+
 
 @dataclass
 class _Node:
@@ -124,25 +139,14 @@ def get_valid_ground_operators(
         # This is hacky and could break things due to naming, but ok for now
         def _sample_param_type(param_type: str) -> str:
             if param_type in param_type_to_literals:
-                if param_type == "conf":
-                    # remove the 'q' prefix
-                    conf_nums = {int(lit[1:]) for lit in param_type_to_literals[param_type]}
-                    conf_max = max(conf_nums)
-                    return f"q{conf_max + 1}"
-                elif param_type == "pose":
-                    pose_nums = {int(lit[4:]) for lit in param_type_to_literals[param_type]}
-                    pose_max = max(pose_nums)
-                    return f"pose{pose_max + 1}"
-                elif param_type == "traj":
-                    traj_nums = {int(lit[4:]) for lit in param_type_to_literals[param_type]}
-                    traj_max = max(traj_nums)
-                    return f"traj{traj_max + 1}"
-                elif param_type == "grasp":
-                    grasp_nums = {int(lit[5:]) for lit in param_type_to_literals[param_type]}
-                    grasp_max = max(grasp_nums)
-                    return f"grasp{grasp_max + 1}"
-                else:
+                if param_type not in _FABRICABLE_TYPE_PREFIXES:
                     raise NotImplementedError
+                # Existing literals follow the convention `<prefix><N>` (e.g. q0, q1, pose3).
+                # Strip the prefix to recover N for each existing literal, then mint a fresh
+                # symbol one past the current max — e.g. {q0, q1, q2} -> "q3".
+                prefix = _FABRICABLE_TYPE_PREFIXES[param_type]
+                existing_nums = {int(lit[len(prefix):]) for lit in param_type_to_literals[param_type]}
+                return f"{prefix}{max(existing_nums) + 1}"
             else:
                 return f"{param_type}1"
 
@@ -256,17 +260,16 @@ def breadth_first_search(
             raise ValueError(f"Goal state must contain only atoms, got {elem.__class__.__name__} {elem}")
 
     # Reject goal atoms whose literals can never appear in any reachable state.
-    # Operator sampling fabricates fresh symbols only for the internal types below;
-    # any other type (movable, surface, ...) must already be in the initial state,
-    # otherwise BFS expands fresh conf/pose/traj/grasp samples forever without ever satisfying the goal.
-    fabricable_types = {"conf", "pose", "traj", "grasp"}
+    # Operator sampling fabricates fresh symbols only for FABRICABLE_TYPES; literals
+    # of any other type (movable, surface, ...) must already be in the initial state,
+    # otherwise BFS expands fresh samples forever without satisfying the goal.
     initial_literals_by_type: dict[str, set[str]] = defaultdict(set)
     for atom in initial_state:
         for param, value in zip(atom.fluent.parameters, atom.values):
             initial_literals_by_type[param.type].add(value)
     for atom in goal_state:
         for param, value in zip(atom.fluent.parameters, atom.values):
-            if param.type in fabricable_types:
+            if param.type in FABRICABLE_TYPES:
                 continue
             if value not in initial_literals_by_type.get(param.type, set()):
                 known = sorted(initial_literals_by_type.get(param.type, set()))
