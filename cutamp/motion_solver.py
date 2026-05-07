@@ -418,29 +418,32 @@ def solve_curobo(
     ts = visualizer.log_joint_trajectory(plan.position, timeline=timeline, start_time=ts, dt=dt)
 
     # Plan to go home at the end which we'll assume is q0
-    q_last = last_js.position[0]
-    q_home = best_particle["q0"].clone()
-    js_last = JointState.from_position(q_last[None])
-    js_home = JointState.from_position(q_home[None])
-    with timer.time(f"{timeline}_planning"):
-        result = motion_gen.plan_single_js(js_last, js_home, plan_config)
-    if not result.success:
-        raise MotionPlanningError("Failed to plan for going home")
+    if config.plan_to_initial_conf:
+        q_last = last_js.position[0]
+        q_home = best_particle["q0"].clone()
+        js_last = JointState.from_position(q_last[None])
+        js_home = JointState.from_position(q_home[None])
+        with timer.time(f"{timeline}_planning"):
+            result = motion_gen.plan_single_js(js_last, js_home, plan_config)
+        if not result.success:
+            raise MotionPlanningError("Failed to plan for going home")
 
-    dt = result.interpolation_dt
-    plan = result.get_interpolated_plan()
-    accum_plans.append(
-        {
-            "type": "trajectory",
-            "plan": plan,
-            "dt": dt,
-            "optimized_plan": result.optimized_plan,
-            "optimized_dt": result.optimized_dt,
-            "label": "GoToInitial(q0)",
-        }
-    )
-    _ = visualizer.log_joint_trajectory(plan.position, timeline=timeline, start_time=ts, dt=dt)
-    _log.debug("Planned to go home")
+        dt = result.interpolation_dt
+        plan = result.get_interpolated_plan()
+        accum_plans.append(
+            {
+                "type": "trajectory",
+                "plan": plan,
+                "dt": dt,
+                "optimized_plan": result.optimized_plan,
+                "optimized_dt": result.optimized_dt,
+                "label": "GoToInitial(q0)",
+            }
+        )
+        _ = visualizer.log_joint_trajectory(plan.position, timeline=timeline, start_time=ts, dt=dt)
+        _log.debug("Planned to go home")
+    else:
+        _log.debug("Skipping plan-to-initial-conf segment (config.plan_to_initial_conf=False)")
 
     _log.info(f"Motion planning metrics: {timer.get_summary(f'{timeline}_planning')}")
     return accum_plans

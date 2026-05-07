@@ -94,6 +94,8 @@ class TAMPConfiguration:
     max_motion_refine_attempts: Optional[int] = None
     # For slowing down cuRobo motion plans (0.5 is safe on the real robot)
     time_dilation_factor: Optional[float] = None
+    # Whether to append a final motion-plan segment back to the initial joint configuration
+    plan_to_initial_conf: bool = True
     # Whether to warmup IK solver
     warmup_ik: bool = True
     # Whether to warmup motion generator
