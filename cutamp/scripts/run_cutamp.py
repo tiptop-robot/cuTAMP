@@ -56,6 +56,9 @@ def load_demo_env(name: str) -> TAMPEnvironment:
     elif name == "blocks_5":
         env_path = os.path.join(get_env_dir(), "blocks_5.yml")
         env = load_env(env_path)
+    elif name == "pick_block":
+        env_path = os.path.join(get_env_dir(), "pick_block.yml")
+        env = load_env(env_path)
     else:
         raise ValueError(f"Unknown environment name: {name}")
     return env
@@ -104,6 +107,7 @@ def entrypoint():
             "blocks_tight",
             "unpack",
             "blocks_5",
+            "pick_block",
         ],
     )
     parser.add_argument(
