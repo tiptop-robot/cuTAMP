@@ -19,8 +19,9 @@ from einops import rearrange
 from jaxtyping import Float
 
 from curobo.rollout.cost.self_collision_cost import SelfCollisionCost, SelfCollisionCostConfig
+from curobo.types.math import Pose
 from cutamp.config import TAMPConfiguration
-from cutamp.costs import curobo_pose_error, dist_from_bounds_jit, sphere_to_sphere_overlap, trajectory_length
+from cutamp.costs import dist_from_bounds_jit, sphere_to_sphere_overlap, trajectory_length
 from cutamp.rollout import Rollout
 from cutamp.tamp_world import TAMPWorld
 from cutamp.task_planning import PlanSkeleton
@@ -272,7 +273,18 @@ class CostFunction:
 
     def kinematic_costs(self, rollout: Rollout) -> Union[dict, None]:
         """Kinematic constraints - i.e., pose error between actual and desired end-effector poses."""
-        pos_errs, rot_errs = curobo_pose_error(rollout["world_from_ee"], rollout["world_from_ee_desired"])
+        # FK side: build a Pose from stored position+quaternion to skip the matrix round-trip.
+        # Desired side is a 4x4 built from matrix multiplication upstream, so it still needs from_matrix.
+        ee_pose = Pose(
+            position=rollout["ee_position"].view(-1, 3),
+            quaternion=rollout["ee_quaternion"].view(-1, 4),
+            normalize_rotation=False,
+        )
+        desired_pose = Pose.from_matrix(rollout["world_from_ee_desired"].view(-1, 4, 4))
+        p_dist_flat, quat_dist_flat = ee_pose.distance(desired_pose)
+        batch_shape = rollout["ee_position"].shape[:-1]
+        pos_errs = p_dist_flat.view(batch_shape)
+        rot_errs = quat_dist_flat.view(batch_shape)
         kinematic_cost = {
             "type": "constraint",
             "constraints": self.kinematic_constraints,
@@ -446,17 +458,14 @@ class CostFunction:
             coll_values = {"robot_to_world": self.world.collision_fn(robot_spheres)}
 
         # Collision between movables and world — batch all activated objects in one collision_fn call,
-        # then mask out timesteps before each object's first placement (objects may initially be in
-        # collision with surfaces they rest on, e.g. due to perception noise). The motion solver
-        # handles this analogously by temporarily detaching the object from the robot when the
-        # grasped object's spheres cause an invalid start state during retract planning.
+        # then mask out timesteps before each object's first placement. The motion solver handles this
+        # analogously by temporarily detaching the object from the robot when the grasped object's
+        # spheres cause an invalid start state during retract planning.
         with torch.profiler.record_function("coll::movable_to_world"):
             stacked = torch.stack([obj_to_spheres[obj] for obj in self._activated_objs])
             coll = self.world.collision_fn(rearrange(stacked, "objs b t n d -> (objs b) t n d"))
             coll = rearrange(coll, "(objs b) t -> objs b t", objs=len(self._activated_objs))
-
             if self.config.mask_initial_movable_world_collision:
-                # Mask is fixed per skeleton — cache after first call
                 if self._movable_world_mask is None:
                     num_objs, t = coll.shape[0], coll.shape[2]
                     mask = torch.ones(num_objs, 1, t, device=coll.device)
@@ -475,10 +484,13 @@ class CostFunction:
             coll_values["movable_to_world"] = coll.sum(dim=0)
 
         with torch.profiler.record_function("coll::robot_to_movables"):
-            act_dist = self.config.gripper_activation_distance
-            coll_values["robot_to_movables"] = sum(
-                sphere_to_sphere_overlap(robot_spheres, obj_s[:, self._all_pose_ts], activation_distance=act_dist)
-                for obj_s in obj_to_spheres.values()
+            # Concatenate all movable spheres into one kernel launch — faster than per-object
+            # launches at our sphere counts (~50/object) where launch overhead dominates.
+            all_obj_spheres = torch.cat(
+                [obj_s[:, self._all_pose_ts] for obj_s in obj_to_spheres.values()], dim=-2
+            )
+            coll_values["robot_to_movables"] = sphere_to_sphere_overlap(
+                robot_spheres, all_obj_spheres, activation_distance=self.config.gripper_activation_distance
             )
 
         # Collision between movable objects

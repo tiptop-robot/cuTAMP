@@ -20,6 +20,7 @@ from cutamp.config import TAMPConfiguration
 from cutamp.constraint_checker import ConstraintChecker
 from cutamp.cost_function import CostFunction
 from cutamp.cost_reduction import CostReducer
+from curobo.types.math import Pose as CuroboPose
 from cutamp.rollout import RolloutFunction
 from cutamp.tamp_domain import Conf, Grasp, Pose, Traj
 from cutamp.task_planning import PlanSkeleton
@@ -151,6 +152,7 @@ class ParticleOptimizer:
                 cost_dict = cost_fn(rollout)
             with torch.profiler.record_function("cost_reduction"):
                 costs = self.cost_reducer(cost_dict, consider_types=consider_types)
+            with torch.profiler.record_function("satisfying_mask"):
                 satisfying_mask = self.get_satisfying_mask(cost_dict, verbose=False)
             num_satisfying = satisfying_mask.sum().item()
             # If num satisfying bigger than desired proportion, break
@@ -274,8 +276,11 @@ class ParticleOptimizer:
                 gripper_joints = []
             visualizer.set_joint_positions(q.tolist() + gripper_joints)
 
-            world_from_ee = rollout["world_from_ee"][best_idx, ts].cpu()
-            visualizer.log_mat4x4("rollout/ee_pose", world_from_ee)
+            ee_pose = CuroboPose(
+                position=rollout["ee_position"][best_idx, ts][None],
+                quaternion=rollout["ee_quaternion"][best_idx, ts][None],
+            )
+            visualizer.log_mat4x4("rollout/ee_pose", ee_pose.get_matrix()[0].cpu())
 
             robot_spheres = rollout["robot_spheres"][best_idx, ts].cpu()
             visualizer.log_spheres("rollout/robot_spheres", robot_spheres)
