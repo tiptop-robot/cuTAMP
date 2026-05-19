@@ -33,3 +33,42 @@ def test_pick_only_goal_finds_plan():
     _, num_satisfying, failure_reason = run_cutamp(env, config, cost_reducer, constraint_checker)
     assert failure_reason is None
     assert num_satisfying > 0
+
+
+@gpu
+def test_pick_only_goal_with_motion_plan_endpoints_consistent():
+    """End-to-end planning with `curobo_plan=True` should produce a motion plan whose
+    interpolated `plan` and `optimized_plan` end at the same joint configuration for every
+    trajectory step. Regression for #16: the final GoToInitial retract used to leak
+    `optimized_plan` from a previous skeleton iteration, so its `optimized_plan` ended at
+    the grasp pose instead of the retract pose."""
+    env = load_env(os.path.join(get_env_dir(), "pick_block.yml"))
+    config = TAMPConfiguration(
+        num_particles=512,
+        robot="fr3_robotiq",
+        num_opt_steps=500,
+        max_loop_dur=20.0,
+        enable_visualizer=False,
+        rr_spawn=False,
+        enable_experiment_logging=False,
+        curobo_plan=True,
+    )
+    cost_reducer = CostReducer(default_constraint_to_mult.copy())
+    constraint_checker = ConstraintChecker(default_constraint_to_tol.copy())
+    plan, num_satisfying, failure_reason = run_cutamp(env, config, cost_reducer, constraint_checker)
+
+    assert failure_reason is None
+    assert num_satisfying > 0
+    assert plan is not None
+
+    trajectories = [step for step in plan if step["type"] == "trajectory"]
+    assert len(trajectories) > 0
+
+    for step in trajectories:
+        interp_end = step["plan"].position[-1]
+        opt_end = step["optimized_plan"].position[-1]
+        assert torch.allclose(interp_end, opt_end, atol=1e-3), (
+            f"{step['label']}: optimized_plan endpoint {opt_end.tolist()} diverges from "
+            f"interpolated plan endpoint {interp_end.tolist()} — likely a leaked `result` "
+            f"from a previous skeleton iteration (see #16)"
+        )
