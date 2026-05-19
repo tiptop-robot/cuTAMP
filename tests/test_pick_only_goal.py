@@ -37,11 +37,9 @@ def test_pick_only_goal_finds_plan():
 
 @gpu
 def test_pick_only_goal_with_motion_plan_endpoints_consistent():
-    """End-to-end planning with `curobo_plan=True` should produce a motion plan whose
-    interpolated `plan` and `optimized_plan` end at the same joint configuration for every
-    trajectory step. Regression for #16: the final GoToInitial retract used to leak
-    `optimized_plan` from a previous skeleton iteration, so its `optimized_plan` ended at
-    the grasp pose instead of the retract pose."""
+    """Every trajectory step in the returned motion plan must have its interpolated `plan`
+    and `optimized_plan` end at the same joint configuration — they are the resampled and
+    raw forms of the same trajopt output."""
     env = load_env(os.path.join(get_env_dir(), "pick_block.yml"))
     config = TAMPConfiguration(
         num_particles=512,
@@ -69,6 +67,5 @@ def test_pick_only_goal_with_motion_plan_endpoints_consistent():
         opt_end = step["optimized_plan"].position[-1]
         assert torch.allclose(interp_end, opt_end, atol=1e-3), (
             f"{step['label']}: optimized_plan endpoint {opt_end.tolist()} diverges from "
-            f"interpolated plan endpoint {interp_end.tolist()} — likely a leaked `result` "
-            f"from a previous skeleton iteration (see #16)"
+            f"interpolated plan endpoint {interp_end.tolist()}"
         )
