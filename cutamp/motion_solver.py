@@ -406,8 +406,8 @@ def solve_curobo(
             "type": "trajectory",
             "plan": plan,
             "dt": dt,
-            "optimized_plan": result.optimized_plan,
-            "optimized_dt": result.optimized_dt,
+            "optimized_plan": retract_result.optimized_plan,
+            "optimized_dt": retract_result.optimized_dt,
             "label": "GoToInitial(q0)",
         }
     )
