@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.5] - 2026-05-19
+
+### Added
+- `pick_block` environment with a `Holding` goal for pick-only planning (#18)
+- `tests/test_pick_only_goal.py` covering planning with a `Holding`-only goal (#18)
+- `tests/test_task_planning.py` covering BFS goal-literal validation (#14)
+
+### Fixed
+- BFS now rejects goal atoms whose non-fabricable literals (e.g. `movable`, `surface`) do not appear in the initial state, raising `ValueError` instead of expanding the frontier forever. Fixes a hang triggered by hallucinated perception objects in the goal (#14)
+- Pick-only goals no longer crash in cost-function setup: object pairs and movable-to-world collision masks now handle objects that are picked but never placed (#18)
+
+### Changed
+- Consolidated fresh-symbol minting in `get_valid_ground_operators` behind a single `_FABRICABLE_TYPE_PREFIXES` table so the sampler and the BFS goal validator cannot drift out of sync (#14)
+
 ## [0.0.4] - 2026-04-14
 
 All changes in this release are from #11 (Warp sphere overlap + FK Pose optimizations).
