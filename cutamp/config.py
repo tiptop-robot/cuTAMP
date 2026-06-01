@@ -48,6 +48,8 @@ class TAMPConfiguration:
     stick_button_experiment: bool = False
 
     ## Experimental Stuff
+    # Whether to enable the PlaceNear operator. You should tune the NearPlacement cost weight and tolerance.
+    near_placement: bool = False
     # Whether to check placements using AABB or OBB formulation
     placement_check: Literal["aabb", "obb"] = "aabb"
     # Distance to shrink the placement region check on all sides, only supported for OBB right now

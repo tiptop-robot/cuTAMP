@@ -164,12 +164,9 @@ class RolloutFunction:
                 action_to_ts[grasp_name] = ts
                 action_to_pose_ts[grasp_name] = pose_ts
 
-            # Place / PlaceNear (rollout only needs obj/grasp/placement; reference is cost-only)
+            # Place / PlaceNear — rollout only needs obj/grasp/placement; PlaceNear's reference is cost-only
             elif op_name == Place.name or op_name == PlaceNear.name:
-                if op_name == Place.name:
-                    obj_name, grasp_name, place_name, _, _ = ground_op.values
-                else:
-                    obj_name, grasp_name, place_name, _, _, _ = ground_op.values
+                obj_name, grasp_name, place_name = ground_op.values[:3]
 
                 # Place is desired object pose in world frame
                 place_4dof = particles[place_name]

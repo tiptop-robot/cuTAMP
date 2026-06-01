@@ -143,17 +143,13 @@ class CostFunction:
             target_z = surface_z + world.collision_activation_distance + 2e-3  # add some buffer
             self.surface_to_target_z[surface] = target_z
 
-        # Pre-compute reference xy positions and per-constraint distance thresholds for NearPlacement.
-        # Threshold = ref_half_extent + obj_half_extent + 3cm gap, derived from initial-pose AABBs.
-        self.near_ref_xy = {}  # reference name -> (2,) tensor
+        # Pre-compute per-constraint NearPlacement thresholds: center-to-center xy distance plus a 3cm gap.
         self.near_thresholds = []  # per-constraint scalar threshold (matches order of near_placement_constraints)
         device = self.world.device
         for con in self.near_placement_constraints:
             obj_name, _, ref_name = con.params
-            if ref_name not in self.near_ref_xy:
-                ref_aabb = self.world.get_aabb(ref_name)
-                self.near_ref_xy[ref_name] = (ref_aabb[0, :2] + ref_aabb[1, :2]) / 2
-            ref_half = ((self.world.get_aabb(ref_name)[1, :2] - self.world.get_aabb(ref_name)[0, :2]).max() / 2).item()
+            ref_aabb = self.world.get_aabb(ref_name)
+            ref_half = ((ref_aabb[1, :2] - ref_aabb[0, :2]).max() / 2).item()
             obj_aabb = self.world.get_aabb(obj_name)
             obj_half = ((obj_aabb[1, :2] - obj_aabb[0, :2]).max() / 2).item()
             self.near_thresholds.append(
@@ -471,10 +467,10 @@ class CostFunction:
         for con, threshold in zip(self.near_placement_constraints, self.near_thresholds):
             obj_name, placement, ref_name = con.params
             pose_ts = rollout["action_to_pose_ts"][placement]
-            obj_pose = rollout["obj_to_pose"][obj_name][:, pose_ts]  # (b, 4, 4)
-            obj_xy = obj_pose[:, :2, 3]  # (b, 2)
-            ref_xy = self.near_ref_xy[ref_name]
-            dist_xy = torch.linalg.norm(obj_xy - ref_xy[None], dim=-1)  # (b,)
+            # Read both poses at the placement timestep so the reference's current location is used.
+            obj_xy = rollout["obj_to_pose"][obj_name][:, pose_ts][:, :2, 3]  # (b, 2)
+            ref_xy = rollout["obj_to_pose"][ref_name][:, pose_ts][:, :2, 3]  # (b, 2)
+            dist_xy = torch.linalg.norm(obj_xy - ref_xy, dim=-1)  # (b,)
             # Shape (b, 1) to match the 2-D convention used by other constraints
             # (e.g. StablePlacement). heuristic_fn in algorithm.py only handles 2-D values correctly.
             near_vals[f"{obj_name}_near_{ref_name}"] = torch.relu(dist_xy - threshold).unsqueeze(-1)

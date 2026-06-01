@@ -26,7 +26,11 @@ class CostReducer:
         }
 
     def _get_multiplier(self, cost_type: str, name: str) -> Optional[float]:
-        return self.cost_to_multiplier.get((cost_type, name))
+        # Fall back to a per-type "default" multiplier when there's no exact (type, name) match.
+        key = (cost_type, name)
+        if key in self.cost_to_multiplier:
+            return self.cost_to_multiplier[key]
+        return self.cost_to_multiplier.get((cost_type, "default"))
 
     def get_cost(self, cost_dict: Dict[str, dict], consider_types: Set[str]) -> Float[torch.Tensor, "num_particles"]:
         """Returns total cost per particle by taking weighted sum of considered cost types."""

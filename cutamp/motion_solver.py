@@ -250,12 +250,10 @@ def solve_curobo(
             all_pos = torch.cat([all_pos, interp], dim=1)
             ts = visualizer.log_joint_trajectory(all_pos, timeline=timeline, start_time=ts, dt=dt)
 
-        # Place / PlaceNear (motion plan is identical; reference is cost-only)
+        # Place / PlaceNear — identical motion plan; PlaceNear's reference is cost-only
         elif op_name == Place.name or op_name == PlaceNear.name:
-            if op_name == Place.name:
-                obj, grasp, placement, surface, q = ground_op.values
-            else:
-                obj, grasp, placement, surface, _reference, q = ground_op.values
+            obj, grasp, placement, surface = ground_op.values[:4]
+            q = ground_op.values[-1]
             assert last_js is not None
 
             with timer.time(f"{timeline}_planning"):

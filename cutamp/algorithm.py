@@ -32,7 +32,7 @@ from cutamp.optimize_plan import ParticleOptimizer
 from cutamp.particle_initialization import ParticleInitializer
 from cutamp.robots import get_q_home, load_robot_container
 from cutamp.rollout import RolloutFunction
-from cutamp.tamp_domain import all_tamp_operators
+from cutamp.tamp_domain import Near, PlaceNear, all_tamp_operators
 from cutamp.tamp_world import TAMPWorld, check_tamp_world_not_in_collision
 from cutamp.task_planning import PlanSkeleton, task_plan_generator
 from cutamp.utils.common import get_world_cfg
@@ -407,14 +407,19 @@ def run_cutamp(
     exp_logger, visualizer, timer, world = setup_cutamp(env, config, q_init, experiment_id, ik_solver, experiment_dir)
     particle_initializer = ParticleInitializer(world, config, grasps)
 
-    # Task plan generator
+    if any(atom.name == Near.name for atom in world.goal_state) and not config.near_placement:
+        raise ValueError(
+            "Goal contains a Near atom but config.near_placement is False."
+        )
+    operators = all_tamp_operators if config.near_placement else [op for op in all_tamp_operators if op is not PlaceNear]
+
     _log.info(f"Initial State: {world.initial_state}")
     _log.info(f"Goal State: {world.goal_state}")
     with timer.time("get_plan_generator", log_callback=_log.info):
         plan_gen = task_plan_generator(
             world.initial_state,
             world.goal_state,
-            operators=all_tamp_operators,
+            operators=operators,
             explored_state_check=config.explored_state_check,
         )
 

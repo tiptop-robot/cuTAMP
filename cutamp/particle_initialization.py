@@ -219,13 +219,10 @@ class ParticleInitializer:
                         "confidences": particles[f"{grasp}_confidences"],
                     }
 
-            # Place / PlaceNear (placement sampling is identical; PlaceNear's lateral pull
-            # toward the reference is handled in the cost function, not at init time)
+            # Place / PlaceNear — identical sampling; PlaceNear's reference is handled in the cost function
             elif op_name == Place.name or op_name == PlaceNear.name:
-                if op_name == Place.name:
-                    obj, grasp, placement, surface, q = params
-                else:
-                    obj, grasp, placement, surface, _reference, q = params
+                obj, grasp, placement, surface = params[:4]
+                q = params[-1]
                 if not world.has_object(obj):
                     raise ValueError(f"{obj=} not found in world")
                 if grasp not in particles:

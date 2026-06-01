@@ -26,6 +26,7 @@ _log = logging.getLogger(__name__)
 default_constraint_to_mult = {
     KinematicConstraint.type: {"pos_err": 1.0, "rot_err": 5.0},
     StablePlacement.type: {"goal_support": 2.0},
+    # Weight on the distance penalty. Should tune for your use case.
     NearPlacement.type: {"default": 0.2},
     TrajectoryLength.type: {"traj_length": 1e-3},
     "soft": {
@@ -89,6 +90,7 @@ default_constraint_to_tol = {
         "stove_support": 1e-2,
     },
     ValidPush.type: {"dist_from_button": 0.0},
+    # Satisfaction slack (meters) the placement may exceed the near-placement threshold by. Should tune for your use case.
     NearPlacement.type: {"default": 5e-2},
 }
 
