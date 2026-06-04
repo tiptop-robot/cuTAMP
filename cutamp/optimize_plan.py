@@ -143,77 +143,80 @@ class ParticleOptimizer:
                 _log.warning(f"Optimization exceeded max time of {self.config.max_loop_dur:.2f}s")
                 time_exceeded = True
                 break
+            # try/finally so the timer is released even when the body breaks/raises mid-iteration.
             timer.start("optimization_step")
-            optimizer.zero_grad()
+            try:
+                optimizer.zero_grad()
 
-            with torch.profiler.record_function("rollout"):
-                rollout = rollout_fn(particles)
-            with torch.profiler.record_function("cost_fn"):
-                cost_dict = cost_fn(rollout)
-            with torch.profiler.record_function("cost_reduction"):
-                costs = self.cost_reducer(cost_dict, consider_types=consider_types)
-            with torch.profiler.record_function("satisfying_mask"):
-                satisfying_mask = self.get_satisfying_mask(cost_dict, verbose=False)
-            num_satisfying = satisfying_mask.sum().item()
-            # If num satisfying bigger than desired proportion, break
-            if self.num_satisfying_break is not None and num_satisfying >= self.num_satisfying_break:
-                _log.info(
-                    f"Found {num_satisfying} >= {self.num_satisfying_break} ({self.config.prop_satisfying_break * 100:.2f}%) satisfying particles "
-                )
-                break
+                with torch.profiler.record_function("rollout"):
+                    rollout = rollout_fn(particles)
+                with torch.profiler.record_function("cost_fn"):
+                    cost_dict = cost_fn(rollout)
+                with torch.profiler.record_function("cost_reduction"):
+                    costs = self.cost_reducer(cost_dict, consider_types=consider_types)
+                with torch.profiler.record_function("satisfying_mask"):
+                    satisfying_mask = self.get_satisfying_mask(cost_dict, verbose=False)
+                num_satisfying = satisfying_mask.sum().item()
+                # If num satisfying bigger than desired proportion, break
+                if self.num_satisfying_break is not None and num_satisfying >= self.num_satisfying_break:
+                    _log.info(
+                        f"Found {num_satisfying} >= {self.num_satisfying_break} ({self.config.prop_satisfying_break * 100:.2f}%) satisfying particles "
+                    )
+                    break
 
-            opt_metrics["num_satisfying"].append(num_satisfying)
+                opt_metrics["num_satisfying"].append(num_satisfying)
 
-            if num_satisfying > 0 and not found_solution:
-                if timer.has_timer("first_solution"):
-                    time_to_first_sol = timer.stop("first_solution")
-                    _log.info(f"Found first solution in {time_to_first_sol:.2f}s after sampling plans")
+                if num_satisfying > 0 and not found_solution:
+                    if timer.has_timer("first_solution"):
+                        time_to_first_sol = timer.stop("first_solution")
+                        _log.info(f"Found first solution in {time_to_first_sol:.2f}s after sampling plans")
 
-                torch.cuda.synchronize()
-                opt_metrics["opt_start_to_first_sol"] = time.perf_counter() - start_time
-                found_solution = True
+                    torch.cuda.synchronize()
+                    opt_metrics["opt_start_to_first_sol"] = time.perf_counter() - start_time
+                    found_solution = True
 
-            loss = costs.mean()
-            opt_metrics["loss"].append(loss.item())
+                loss = costs.mean()
+                opt_metrics["loss"].append(loss.item())
 
-            # Compute soft costs if required (even if we don't optimize them)
-            if self.config.soft_cost is not None:
-                soft_costs = self.cost_reducer.soft_costs(cost_dict)
-                best_soft_cost = soft_costs[satisfying_mask].min().item() if num_satisfying > 0 else None
-                opt_metrics["best_soft_costs"].append(best_soft_cost)
+                # Compute soft costs if required (even if we don't optimize them)
+                if self.config.soft_cost is not None:
+                    soft_costs = self.cost_reducer.soft_costs(cost_dict)
+                    best_soft_cost = soft_costs[satisfying_mask].min().item() if num_satisfying > 0 else None
+                    opt_metrics["best_soft_costs"].append(best_soft_cost)
 
-            # Note: no cuda synchronize here — elapsed is approximate (CPU submission time).
-            # Accurate GPU timing is available via timer.stop("optimization_step") and --torch-profile.
-            opt_metrics["elapsed"].append(time.perf_counter() - start_time)
+                # Note: no cuda synchronize here — elapsed is approximate (CPU submission time).
+                # Accurate GPU timing is available via timer.stop("optimization_step") and --torch-profile.
+                opt_metrics["elapsed"].append(time.perf_counter() - start_time)
 
-            # Visualize the optimization progress. We do this before stepping the optimizer to see current state.
-            if step % vis_every == 0 or step == num_steps - 1:
-                timer.start("visualize_opt_rollout")
-                # Visualize satisfying particles if we have any. Otherwise, just show the best particle so far.
-                if num_satisfying > 0:
-                    best_satisfying_idx = costs[satisfying_mask].argmin()
-                    best_idx = indices[satisfying_mask][best_satisfying_idx]
-                else:
-                    best_idx = costs.argmin()
+                # Visualize the optimization progress. We do this before stepping the optimizer to see current state.
+                if step % vis_every == 0 or step == num_steps - 1:
+                    timer.start("visualize_opt_rollout")
+                    # Visualize satisfying particles if we have any. Otherwise, just show the best particle so far.
+                    if num_satisfying > 0:
+                        best_satisfying_idx = costs[satisfying_mask].argmin()
+                        best_idx = indices[satisfying_mask][best_satisfying_idx]
+                    else:
+                        best_idx = costs.argmin()
 
-                # Show last state after rolling out the best particle
-                visualizer.set_time_sequence(f"opt_{self.opt_counter}", step)
-                q_last = rollout["confs"][best_idx, -1].tolist()
-                visualizer.set_joint_positions(q_last)
-                for obj in rollout["obj_to_pose"]:
-                    mat4x4_last = rollout["obj_to_pose"][obj][best_idx, -1]
-                    visualizer.log_mat4x4(f"world/{obj}", mat4x4_last)
+                    # Show last state after rolling out the best particle
+                    visualizer.set_time_sequence(f"opt_{self.opt_counter}", step)
+                    q_last = rollout["confs"][best_idx, -1].tolist()
+                    visualizer.set_joint_positions(q_last)
+                    for obj in rollout["obj_to_pose"]:
+                        mat4x4_last = rollout["obj_to_pose"][obj][best_idx, -1]
+                        visualizer.log_mat4x4(f"world/{obj}", mat4x4_last)
 
-                visualizer.log_cost_dict(cost_dict)
-                visualizer.log_scalar("loss", loss.item())
-                timer.stop("visualize_opt_rollout")
+                    visualizer.log_cost_dict(cost_dict)
+                    visualizer.log_scalar("loss", loss.item())
+                    timer.stop("visualize_opt_rollout")
 
-            # Compute gradients and step the optimizer
-            with torch.profiler.record_function("backward"):
-                loss.backward()
-            with torch.profiler.record_function("optimizer_step"):
-                optimizer.step()
-            timer.stop("optimization_step")
+                # Compute gradients and step the optimizer
+                with torch.profiler.record_function("backward"):
+                    loss.backward()
+                with torch.profiler.record_function("optimizer_step"):
+                    optimizer.step()
+            finally:
+                timer.stop("optimization_step")
             pbar.set_description(
                 f"Loss: {loss:.3f}, Min: {costs.min():.3f}, {num_satisfying}/{self.config.num_particles} satisfying"
             )

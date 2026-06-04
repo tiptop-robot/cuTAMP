@@ -160,7 +160,8 @@ def get_world_cfg(env: TAMPEnvironment, include_movables: bool = False) -> World
     from cutamp.utils.obb import get_object_obb
 
     geoms = defaultdict(list)
-    obstacles = env.movables if include_movables else []
+    # Copy to avoid the `+=` below mutating env.movables in place.
+    obstacles = list(env.movables) if include_movables else []
     obstacles += env.statics
     for obj in obstacles:
         if isinstance(obj, Cuboid):

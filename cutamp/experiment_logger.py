@@ -27,17 +27,18 @@ _GIT_CWD = Path(__file__).parent
 def _collect_git_info() -> dict:
     """Return git commit hash, dirty status, and porcelain status for metadata."""
     try:
+        # Pin encoding so non-ASCII bytes (e.g. unicode in filenames) don't trip the locale's default.
         commit = subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
             cwd=_GIT_CWD,
             stderr=subprocess.DEVNULL,
-            text=True,
+            encoding="utf-8",
         ).strip()
         porcelain = subprocess.check_output(
             ["git", "status", "--porcelain"],
             cwd=_GIT_CWD,
             stderr=subprocess.DEVNULL,
-            text=True,
+            encoding="utf-8",
         )
         dirty = bool(porcelain.strip())
         return {"commit": commit, "dirty": dirty, "porcelain": porcelain.strip() if dirty else None}
@@ -53,7 +54,7 @@ def _get_git_diff() -> str | None:
             ["git", "diff", "HEAD"],
             cwd=_GIT_CWD,
             stderr=subprocess.DEVNULL,
-            text=True,
+            encoding="utf-8",
         )
         return diff if diff else None
     except (FileNotFoundError, subprocess.CalledProcessError):
