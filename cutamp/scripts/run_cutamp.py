@@ -59,6 +59,9 @@ def load_demo_env(name: str) -> TAMPEnvironment:
     elif name == "pick_block":
         env_path = os.path.join(get_env_dir(), "pick_block.yml")
         env = load_env(env_path)
+    elif name == "place_near":
+        env_path = os.path.join(get_env_dir(), "place_near.yml")
+        env = load_env(env_path)
     else:
         raise ValueError(f"Unknown environment name: {name}")
     return env
@@ -108,6 +111,7 @@ def entrypoint():
             "unpack",
             "blocks_5",
             "pick_block",
+            "place_near",
         ],
     )
     parser.add_argument(
@@ -205,6 +209,11 @@ def entrypoint():
     # Object collision spheres and placement
     parser.add_argument("--coll_n_spheres", type=int, default=50, help="Number of collision spheres per object.")
     parser.add_argument(
+        "--near_placement",
+        action="store_true",
+        help="Enable the experimental PlaceNear operator. Required for envs with Near goals (e.g. place_near).",
+    )
+    parser.add_argument(
         "--placement_shrink_dist",
         type=float,
         default=0.0,
@@ -269,6 +278,7 @@ def entrypoint():
         viz_robot_mesh=not args.disable_robot_mesh,
         experiment_root=args.experiment_root,
         coll_n_spheres=args.coll_n_spheres,
+        near_placement=args.near_placement,
         # Note: these are new features with this fork of cuTAMP
         placement_check="obb",
         placement_shrink_dist=args.placement_shrink_dist,
