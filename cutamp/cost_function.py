@@ -145,16 +145,13 @@ class CostFunction:
 
         # Pre-compute per-constraint NearPlacement thresholds: center-to-center xy distance plus a 3cm gap.
         self.near_thresholds = []  # per-constraint scalar threshold (matches order of near_placement_constraints)
-        device = self.world.device
         for con in self.near_placement_constraints:
             obj_name, _, ref_name = con.params
             ref_aabb = self.world.get_aabb(ref_name)
-            ref_half = ((ref_aabb[1, :2] - ref_aabb[0, :2]).max() / 2).item()
+            ref_half = (ref_aabb[1, :2] - ref_aabb[0, :2]).max() / 2
             obj_aabb = self.world.get_aabb(obj_name)
-            obj_half = ((obj_aabb[1, :2] - obj_aabb[0, :2]).max() / 2).item()
-            self.near_thresholds.append(
-                torch.tensor(ref_half + obj_half + 0.03, dtype=torch.float32, device=device)
-            )
+            obj_half = (obj_aabb[1, :2] - obj_aabb[0, :2]).max() / 2
+            self.near_thresholds.append(ref_half + obj_half + 0.03)
 
         # Store the button AABBs for ValidPush
         self.button_to_action = {}
@@ -473,7 +470,7 @@ class CostFunction:
             dist_xy = torch.linalg.norm(obj_xy - ref_xy, dim=-1)  # (b,)
             # Shape (b, 1) to match the 2-D convention used by other constraints
             # (e.g. StablePlacement). heuristic_fn in algorithm.py only handles 2-D values correctly.
-            near_vals[f"{obj_name}_near_{ref_name}"] = torch.relu(dist_xy - threshold).unsqueeze(-1)
+            near_vals[f"{obj_name}_near_{ref_name}_{placement}"] = torch.relu(dist_xy - threshold).unsqueeze(-1)
 
         return {
             "type": "constraint",
