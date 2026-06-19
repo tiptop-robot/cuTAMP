@@ -252,8 +252,8 @@ def solve_curobo(
 
         # Place / PlaceNear — identical motion plan; PlaceNear's reference is cost-only
         elif op_name == Place.name or op_name == PlaceNear.name:
-            obj, grasp, placement, surface = ground_op.values[:4]
-            q = ground_op.values[-1]
+            param_values = ground_op.param_values
+            obj, grasp, placement, surface, q = (param_values[k] for k in ("obj", "grasp", "placement", "surface", "q"))
             assert last_js is not None
 
             with timer.time(f"{timeline}_planning"):

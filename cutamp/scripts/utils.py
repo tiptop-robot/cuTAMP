@@ -90,7 +90,8 @@ default_constraint_to_tol = {
         "stove_support": 1e-2,
     },
     ValidPush.type: {"dist_from_button": 0.0},
-    # Satisfaction slack (meters) the placement may exceed the near-placement threshold by. Should tune for your use case.
+    # Satisfaction slack (meters) on the L2 (center-to-center xy) distance the placement may exceed the
+    # near-placement threshold by. Should tune for your use case.
     NearPlacement.type: {"default": 5e-2},
 }
 

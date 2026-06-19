@@ -10,6 +10,7 @@
 """Core cuTAMP algorithm implementation."""
 
 import logging
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import List, Union, Optional, Tuple
@@ -411,6 +412,8 @@ def run_cutamp(
         raise ValueError(
             "Goal contains a Near atom but config.near_placement is False."
         )
+    if config.near_placement:
+        warnings.warn("config.near_placement is enabled — PlaceNear is experimental. Tune for your use case.")
     operators = all_tamp_operators if config.near_placement else [op for op in all_tamp_operators if op is not PlaceNear]
 
     _log.info(f"Initial State: {world.initial_state}")

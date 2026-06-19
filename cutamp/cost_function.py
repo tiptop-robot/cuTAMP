@@ -465,8 +465,8 @@ class CostFunction:
             obj_name, placement, ref_name = con.params
             pose_ts = rollout["action_to_pose_ts"][placement]
             # Read both poses at the placement timestep so the reference's current location is used.
-            obj_xy = rollout["obj_to_pose"][obj_name][:, pose_ts][:, :2, 3]  # (b, 2)
-            ref_xy = rollout["obj_to_pose"][ref_name][:, pose_ts][:, :2, 3]  # (b, 2)
+            obj_xy = rollout["obj_to_pose"][obj_name][:, pose_ts, :2, 3]  # (b, 2)
+            ref_xy = rollout["obj_to_pose"][ref_name][:, pose_ts, :2, 3]  # (b, 2)
             dist_xy = torch.linalg.norm(obj_xy - ref_xy, dim=-1)  # (b,)
             # Shape (b, 1) to match the 2-D convention used by other constraints
             # (e.g. StablePlacement). heuristic_fn in algorithm.py only handles 2-D values correctly.
