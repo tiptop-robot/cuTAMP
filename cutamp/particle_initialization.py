@@ -221,10 +221,10 @@ class ParticleInitializer:
 
             # Place / PlaceNear — identical sampling; PlaceNear's reference is handled in the cost function
             elif op_name == Place.name or op_name == PlaceNear.name:
-                param_values = ground_op.param_values
-                obj, grasp, placement, surface, q = (
-                    param_values[k] for k in ("obj", "grasp", "placement", "surface", "q")
-                )
+                if op_name == Place.name:
+                    obj, grasp, placement, surface, q = ground_op.values
+                else:
+                    obj, grasp, placement, surface, _, q = ground_op.values
                 if not world.has_object(obj):
                     raise ValueError(f"{obj=} not found in world")
                 if grasp not in particles:

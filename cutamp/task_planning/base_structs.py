@@ -165,11 +165,6 @@ class GroundOperator:
     add_effects: set[Atom]
     del_effects: set[Atom]
 
-    @property
-    def param_values(self) -> dict[str, str]:
-        """Map parameter name to ground value."""
-        return {param.name: value for param, value in zip(self.operator.parameters, self.values)}
-
     def apply(self, state: State) -> State:
         """Apply this ground operator to a state."""
         # Make sure preconditions are satisfied
