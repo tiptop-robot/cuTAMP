@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.0.6] - 2026-06-08
+
+### Added
+- `Near(obj, reference)` fluent and `PlaceNear` operator for placing an object next to a reference object, with a `NearPlacement` constraint and a one-sided lateral-distance cost (#22)
+- `near_placement` config flag (default `False`) gating the `PlaceNear` operator; a `Near` goal with the flag off raises `ValueError` instead of searching forever (#22)
+- `place_near` demo environment plus `--near_placement` CLI flag on `cutamp-demo` (#22)
+- `tests/test_near_placement.py` covering `Near`/`PlaceNear` planning gating and end-to-end `NearPlacement` satisfaction (#22)
+
+### Fixed
+- Retract trajectory now returns `optimized_plan`/`optimized_dt` from the retract motion-gen result instead of the preceding placement result (#16, #21)
+
 ## [0.0.5] - 2026-05-19
 
 ### Added

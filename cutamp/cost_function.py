@@ -33,6 +33,7 @@ from cutamp.task_planning.constraints import (
     CollisionFreePlacement,
     KinematicConstraint,
     Motion,
+    NearPlacement,
     StablePlacement,
     ValidPush,
     ValidPushStick,
@@ -64,6 +65,7 @@ class CostFunction:
         self.kinematic_constraints = []
         self.motion_constraints = []
         self.stable_placement_constraints = []
+        self.near_placement_constraints = []
         self.valid_push_constraints = []
         self.valid_push_stick_constraints = []
         self.traj_length_costs = []
@@ -76,6 +78,7 @@ class CostFunction:
             CollisionFreeGrasp.type: self.cfree_constraints,
             CollisionFreePlacement.type: self.cfree_constraints,
             StablePlacement.type: self.stable_placement_constraints,
+            NearPlacement.type: self.near_placement_constraints,
             ValidPush.type: self.valid_push_constraints,
             ValidPushStick.type: self.valid_push_stick_constraints,
             TrajectoryLength.type: self.traj_length_costs,
@@ -140,6 +143,16 @@ class CostFunction:
             target_z = surface_z + world.collision_activation_distance + 2e-3  # add some buffer
             self.surface_to_target_z[surface] = target_z
 
+        # Pre-compute per-constraint NearPlacement thresholds: center-to-center xy distance plus a 3cm gap.
+        self.near_thresholds = []  # per-constraint scalar threshold (matches order of near_placement_constraints)
+        for con in self.near_placement_constraints:
+            obj_name, _, ref_name = con.params
+            ref_aabb = self.world.get_aabb(ref_name)
+            ref_half = (ref_aabb[1, :2] - ref_aabb[0, :2]).max() / 2
+            obj_aabb = self.world.get_aabb(obj_name)
+            obj_half = (obj_aabb[1, :2] - obj_aabb[0, :2]).max() / 2
+            self.near_thresholds.append(ref_half + obj_half + 0.03)
+
         # Store the button AABBs for ValidPush
         self.button_to_action = {}
         self.button_aabbs = []
@@ -201,7 +214,7 @@ class CostFunction:
             if op_name == "Pick":
                 obj = ground_op.values[0]
                 self.activated_obj.add(obj)
-            elif op_name == "Place":
+            elif op_name == "Place" or op_name == "PlaceNear":
                 obj = ground_op.values[0]
                 pose = ground_op.values[2]
                 self.activated_obj.add(obj)
@@ -442,6 +455,29 @@ class CostFunction:
         }
         return stable_placement_cost
 
+    def near_placement_costs(self, rollout: Rollout) -> Union[dict, None]:
+        """One-sided lateral-distance cost: penalize placement xy farther than threshold from the reference's xy."""
+        if not self.near_placement_constraints:
+            return None
+
+        near_vals = {}
+        for con, threshold in zip(self.near_placement_constraints, self.near_thresholds):
+            obj_name, placement, ref_name = con.params
+            pose_ts = rollout["action_to_pose_ts"][placement]
+            # Read both poses at the placement timestep so the reference's current location is used.
+            obj_xy = rollout["obj_to_pose"][obj_name][:, pose_ts, :2, 3]  # (b, 2)
+            ref_xy = rollout["obj_to_pose"][ref_name][:, pose_ts, :2, 3]  # (b, 2)
+            dist_xy = torch.linalg.norm(obj_xy - ref_xy, dim=-1)  # (b,)
+            # Shape (b, 1) to match the 2-D convention used by other constraints
+            # (e.g. StablePlacement). heuristic_fn in algorithm.py only handles 2-D values correctly.
+            near_vals[f"{obj_name}_near_{ref_name}_{placement}"] = torch.relu(dist_xy - threshold).unsqueeze(-1)
+
+        return {
+            "type": "constraint",
+            "constraints": self.near_placement_constraints,
+            "values": near_vals,
+        }
+
     def trajectory_costs(self, rollout: Rollout) -> dict:
         """Trajectory costs, just joint space distance between configurations for now."""
         traj_cost = {
@@ -609,6 +645,11 @@ class CostFunction:
         with torch.profiler.record_function("cost::stable_placement"):
             stable_placement_cost = self.stable_placement_costs(rollout, obj_to_spheres)
         add_cost(StablePlacement.type, stable_placement_cost)
+
+        # Near placement cost
+        with torch.profiler.record_function("cost::near_placement"):
+            near_placement_cost = self.near_placement_costs(rollout)
+        add_cost(NearPlacement.type, near_placement_cost)
 
         # Valid motions don't exceed joint limits
         with torch.profiler.record_function("cost::motion"):
