@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.0.6] - 2026-06-08
+## [0.0.6] - 2026-07-30
 
 ### Added
 - `Near(obj, reference)` fluent and `PlaceNear` operator for placing an object next to a reference object, with a `NearPlacement` constraint and a one-sided lateral-distance cost (#22)
